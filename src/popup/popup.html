@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=400">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <h1 class="title">Silent Send</h1>
+        <span class="status-dot" id="statusDot"></span>
+      </div>
+      <div class="header-right">
+        <button class="btn-icon" id="btnReveal" title="Reveal Mode - show real data">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M8 3C4.5 3 1.7 5.1 0.5 8c1.2 2.9 4 5 7.5 5s6.3-2.1 7.5-5c-1.2-2.9-4-5-7.5-5z" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            <circle cx="8" cy="8" r="2.5" stroke="currentColor" stroke-width="1.5" fill="none"/>
+          </svg>
+        </button>
+        <label class="toggle" title="Enable/disable Silent Send">
+          <input type="checkbox" id="enableToggle" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </header>
+
+    <!-- Tab Bar -->
+    <nav class="tabs">
+      <button class="tab active" data-tab="mappings">Mappings</button>
+      <button class="tab" data-tab="activity">Activity</button>
+      <button class="tab" data-tab="test">Test</button>
+    </nav>
+
+    <!-- Mappings Tab -->
+    <section class="tab-content active" id="tab-mappings">
+      <div class="add-mapping">
+        <div class="input-row">
+          <input type="text" id="inputReal" placeholder="Real value (e.g. John Smith)" class="input">
+          <span class="arrow">&rarr;</span>
+          <input type="text" id="inputSub" placeholder="Substitute (e.g. Alex Demo)" class="input">
+        </div>
+        <div class="input-row secondary">
+          <select id="inputCategory" class="select">
+            <option value="name">Name</option>
+            <option value="email">Email</option>
+            <option value="phone">Phone</option>
+            <option value="address">Address</option>
+            <option value="ssn">SSN</option>
+            <option value="dob">DOB</option>
+            <option value="general">General</option>
+          </select>
+          <label class="checkbox-label">
+            <input type="checkbox" id="inputCaseSensitive">
+            Case sensitive
+          </label>
+          <button class="btn btn-primary" id="btnAdd">Add</button>
+        </div>
+      </div>
+
+      <div class="mapping-list" id="mappingList">
+        <div class="empty-state">
+          No mappings yet. Add your first one above.
+        </div>
+      </div>
+    </section>
+
+    <!-- Activity Tab -->
+    <section class="tab-content" id="tab-activity">
+      <div class="activity-header">
+        <span class="badge" id="sessionCount">0 substitutions this session</span>
+        <button class="btn-text" id="btnClearLog">Clear</button>
+      </div>
+      <div class="activity-list" id="activityList">
+        <div class="empty-state">No activity yet.</div>
+      </div>
+    </section>
+
+    <!-- Test Tab -->
+    <section class="tab-content" id="tab-test">
+      <p class="help-text">Type text containing your real values to see what would be sent.</p>
+      <textarea id="testInput" class="textarea" placeholder="Try typing: My name is John Smith and my email is john@example.com" rows="4"></textarea>
+      <div class="diff-view" id="diffView">
+        <div class="diff-label">What gets sent:</div>
+        <div class="diff-output" id="diffOutput"></div>
+      </div>
+      <div class="diff-stats" id="diffStats"></div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <a href="#" id="btnOptions">Options</a>
+    </footer>
+  </div>
+
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

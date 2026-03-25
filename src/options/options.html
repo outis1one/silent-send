@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Silent Send - Options</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Silent Send Options</h1>
+      <p class="subtitle">Manage your privacy substitution mappings</p>
+    </header>
+
+    <section class="section">
+      <h2>Settings</h2>
+      <div class="setting-row">
+        <div>
+          <label>Show inline highlights</label>
+          <p class="setting-desc">Show a subtle underline on text that will be substituted</p>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="showHighlights">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <div>
+          <label>Max log entries</label>
+          <p class="setting-desc">Number of activity log entries to keep</p>
+        </div>
+        <input type="number" id="maxLogEntries" class="input-small" min="10" max="1000" value="200">
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Mappings</h2>
+      <p class="section-desc">Manage all your substitution rules. Longer matches take priority.</p>
+
+      <div class="bulk-actions">
+        <button class="btn" id="btnExport">Export JSON</button>
+        <button class="btn" id="btnImport">Import JSON</button>
+        <input type="file" id="fileImport" accept=".json" hidden>
+        <button class="btn btn-danger" id="btnClearAll">Clear All</button>
+      </div>
+
+      <table class="mapping-table">
+        <thead>
+          <tr>
+            <th>Real Value</th>
+            <th>Substitute</th>
+            <th>Category</th>
+            <th>Case</th>
+            <th>Enabled</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="mappingTableBody">
+        </tbody>
+      </table>
+
+      <div class="add-row">
+        <input type="text" id="newReal" placeholder="Real value" class="input">
+        <input type="text" id="newSub" placeholder="Substitute" class="input">
+        <select id="newCategory" class="select">
+          <option value="name">Name</option>
+          <option value="email">Email</option>
+          <option value="phone">Phone</option>
+          <option value="address">Address</option>
+          <option value="ssn">SSN</option>
+          <option value="dob">DOB</option>
+          <option value="general">General</option>
+        </select>
+        <label class="checkbox-label">
+          <input type="checkbox" id="newCaseSensitive">
+          Aa
+        </label>
+        <button class="btn btn-primary" id="btnAddMapping">Add</button>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Activity Log</h2>
+      <div class="log-actions">
+        <span id="logCount">0 entries</span>
+        <button class="btn btn-danger" id="btnClearLog">Clear Log</button>
+      </div>
+      <div class="log-list" id="logList"></div>
+    </section>
+
+    <footer>
+      <p>Silent Send v0.1.0</p>
+    </footer>
+  </div>
+
+  <script src="options.js" type="module"></script>
+</body>
+</html>

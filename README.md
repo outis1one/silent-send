@@ -28,19 +28,24 @@ A Chrome extension that intercepts personal information and substitutes it with 
 5. Click **Load unpacked** → select `dist/chrome/` (or root dir)
 6. Navigate to claude.ai — the extension is active
 
-### Firefox
+### Firefox (signed, persistent)
 1. Clone this repo
-2. Run `./build.sh firefox`
-3. Open `about:debugging` → **This Firefox**
-4. Click **Load Temporary Add-on** → select `dist/firefox/manifest.json`
-5. Navigate to claude.ai — the extension is active
+2. `npm install`
+3. Get your free Mozilla API credentials at https://addons.mozilla.org/developers/addon/api/key/
+4. `cp .env.example .env` and fill in your key + secret
+5. `source .env && npm run sign:firefox`
+6. Install the `.xpi` file from `dist/firefox-signed/` — drag it into Firefox or use File → Open
+7. Navigate to claude.ai — the extension is active
 
-For persistent Firefox installation, package and sign via `web-ext`:
-```
-cd dist/firefox && npx web-ext sign --api-key=YOUR_KEY --api-secret=YOUR_SECRET
-```
+The signed `.xpi` is permanent — survives restarts, no store listing needed.
 
-No store required for either browser in developer mode.
+### Firefox (temporary, for development)
+```
+npm install && npm run run:firefox
+```
+Opens Firefox with the extension pre-loaded. Reloads on file changes.
+
+No store required for either browser.
 
 ## Architecture
 

@@ -3,4 +3,7 @@ node_modules/
 *.crx
 *.pem
 *.zip
+*.xpi
 dist/
+.env
+web-ext-artifacts/

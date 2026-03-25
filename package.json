@@ -1,0 +1,17 @@
+{
+  "name": "silent-send",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser extension that substitutes personal data before sending to AI services",
+  "scripts": {
+    "build:chrome": "./build.sh chrome",
+    "build:firefox": "./build.sh firefox",
+    "build": "./build.sh both",
+    "lint:firefox": "npx web-ext lint --source-dir dist/firefox",
+    "sign:firefox": "./build.sh firefox && npx web-ext sign --source-dir dist/firefox --artifacts-dir dist/firefox-signed --channel unlisted",
+    "run:firefox": "./build.sh firefox && npx web-ext run --source-dir dist/firefox"
+  },
+  "devDependencies": {
+    "web-ext": "^8.4.0"
+  }
+}

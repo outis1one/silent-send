@@ -9,6 +9,7 @@ import api from './browser-polyfill.js';
 
 const KEYS = {
   MAPPINGS: 'ss_mappings',
+  IDENTITY: 'ss_identity',
   LOG: 'ss_activity_log',
   SETTINGS: 'ss_settings',
 };
@@ -62,6 +63,25 @@ const Storage = {
     const mappings = await this.getMappings();
     const filtered = mappings.filter((m) => m.id !== id);
     await this.saveMappings(filtered);
+  },
+
+  // --- Identity (Smart Patterns) ---
+
+  async getIdentity() {
+    const result = await api.storage.local.get(KEYS.IDENTITY);
+    return result[KEYS.IDENTITY] || {
+      emails: [],
+      names: [],
+      usernames: [],
+      phones: [],
+      catchAllEmail: '',
+      emailDomains: [],
+      enabled: { emails: true, names: true, usernames: true, phones: true, paths: true },
+    };
+  },
+
+  async saveIdentity(identity) {
+    await api.storage.local.set({ [KEYS.IDENTITY]: identity });
   },
 
   // --- Activity Log ---

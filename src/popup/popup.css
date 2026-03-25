@@ -242,6 +242,46 @@ body {
   white-space: nowrap;
 }
 
+/* Identity tab */
+.id-section {
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.id-section:last-of-type {
+  border-bottom: none;
+  margin-bottom: 4px;
+}
+
+.id-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #374151;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.id-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.input-sm {
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.id-hint {
+  font-size: 10px;
+  color: #9ca3af;
+  margin-top: 2px;
+  font-style: italic;
+}
+
 /* Mapping list */
 .add-mapping {
   padding-bottom: 12px;

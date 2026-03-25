@@ -20,13 +20,14 @@ const api =
 
 // Load mappings and settings, then inject into page
 async function init() {
-  const result = await api.storage.local.get(['ss_mappings', 'ss_settings']);
+  const result = await api.storage.local.get(['ss_mappings', 'ss_identity', 'ss_settings']);
   const mappings = result.ss_mappings || [];
+  const identity = result.ss_identity || {};
   const settings = result.ss_settings || { enabled: true };
 
   // Inject the main interception script into the page's world
   const script = document.createElement('script');
-  script.setAttribute('data-ss-config', JSON.stringify({ mappings, settings }));
+  script.setAttribute('data-ss-config', JSON.stringify({ mappings, identity, settings }));
   script.src = api.runtime.getURL('src/content/content.js');
   (document.head || document.documentElement).appendChild(script);
   script.onload = () => script.remove();
@@ -45,10 +46,11 @@ async function init() {
 
   // Forward storage changes to the page script
   api.storage.onChanged.addListener((changes) => {
-    if (changes.ss_mappings || changes.ss_settings) {
+    if (changes.ss_mappings || changes.ss_identity || changes.ss_settings) {
       window.postMessage({
         type: 'ss:config-updated',
         mappings: changes.ss_mappings?.newValue,
+        identity: changes.ss_identity?.newValue,
         settings: changes.ss_settings?.newValue,
       }, '*');
     }

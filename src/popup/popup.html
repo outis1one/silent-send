@@ -29,13 +29,69 @@
 
     <!-- Tab Bar -->
     <nav class="tabs">
-      <button class="tab active" data-tab="mappings">Mappings</button>
+      <button class="tab active" data-tab="identity">Identity</button>
+      <button class="tab" data-tab="mappings">Mappings</button>
       <button class="tab" data-tab="activity">Activity</button>
       <button class="tab" data-tab="test">Test</button>
     </nav>
 
+    <!-- Identity Tab (Smart Patterns) -->
+    <section class="tab-content active" id="tab-identity">
+      <p class="help-text">Tell Silent Send who you are. It auto-catches all variations.</p>
+
+      <div class="id-section">
+        <div class="id-label">Names</div>
+        <div class="id-row">
+          <input type="text" id="idFirstReal" placeholder="First name" class="input input-sm">
+          <span class="arrow">&rarr;</span>
+          <input type="text" id="idFirstSub" placeholder="Fake first" class="input input-sm">
+        </div>
+        <div class="id-row">
+          <input type="text" id="idLastReal" placeholder="Last name" class="input input-sm">
+          <span class="arrow">&rarr;</span>
+          <input type="text" id="idLastSub" placeholder="Fake last" class="input input-sm">
+        </div>
+        <div class="id-hint">Catches: first last, last first, possessives, case variants</div>
+      </div>
+
+      <div class="id-section">
+        <div class="id-label">Email</div>
+        <div class="id-row">
+          <input type="email" id="idEmailReal" placeholder="you@gmail.com" class="input input-sm">
+          <span class="arrow">&rarr;</span>
+          <input type="email" id="idEmailSub" placeholder="fake@example.com" class="input input-sm">
+        </div>
+        <div class="id-row">
+          <input type="email" id="idCatchAllEmail" placeholder="Catch-all email (for unknown addresses)" class="input" style="flex:1">
+        </div>
+        <div class="id-hint">Catches: any *@gmail.com, *@yahoo.com, *@outlook.com, etc.</div>
+      </div>
+
+      <div class="id-section">
+        <div class="id-label">Username / Computer</div>
+        <div class="id-row">
+          <input type="text" id="idUserReal" placeholder="jsmith" class="input input-sm">
+          <span class="arrow">&rarr;</span>
+          <input type="text" id="idUserSub" placeholder="ademo" class="input input-sm">
+        </div>
+        <div class="id-hint">Catches: jsmith@hostname, /home/jsmith, ~jsmith, C:\Users\jsmith</div>
+      </div>
+
+      <div class="id-section">
+        <div class="id-label">Phone</div>
+        <div class="id-row">
+          <input type="text" id="idPhoneReal" placeholder="(555) 123-4567" class="input input-sm">
+          <span class="arrow">&rarr;</span>
+          <input type="text" id="idPhoneSub" placeholder="(555) 000-0000" class="input input-sm">
+        </div>
+        <div class="id-hint">Catches: all formats — (555) 123-4567, 555-123-4567, 555.123.4567</div>
+      </div>
+
+      <button class="btn btn-primary" id="btnSaveIdentity" style="width:100%;margin-top:8px">Save Identity</button>
+    </section>
+
     <!-- Mappings Tab -->
-    <section class="tab-content active" id="tab-mappings">
+    <section class="tab-content" id="tab-mappings">
       <div class="add-mapping">
         <div class="input-row">
           <input type="text" id="inputReal" placeholder="Real value (e.g. John Smith)" class="input">

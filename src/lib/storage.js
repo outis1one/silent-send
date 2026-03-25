@@ -1,9 +1,11 @@
 /**
  * Silent Send - Storage Manager
  *
- * Wraps chrome.storage.local with typed helpers for mappings,
+ * Wraps browser/api.storage.local with typed helpers for mappings,
  * activity log, and settings.
  */
+
+import api from './browser-polyfill.js';
 
 const KEYS = {
   MAPPINGS: 'ss_mappings',
@@ -23,12 +25,12 @@ const Storage = {
   // --- Mappings ---
 
   async getMappings() {
-    const result = await chrome.storage.local.get(KEYS.MAPPINGS);
+    const result = await api.storage.local.get(KEYS.MAPPINGS);
     return result[KEYS.MAPPINGS] || [];
   },
 
   async saveMappings(mappings) {
-    await chrome.storage.local.set({ [KEYS.MAPPINGS]: mappings });
+    await api.storage.local.set({ [KEYS.MAPPINGS]: mappings });
   },
 
   async addMapping(mapping) {
@@ -65,7 +67,7 @@ const Storage = {
   // --- Activity Log ---
 
   async getLog() {
-    const result = await chrome.storage.local.get(KEYS.LOG);
+    const result = await api.storage.local.get(KEYS.LOG);
     return result[KEYS.LOG] || [];
   },
 
@@ -84,23 +86,23 @@ const Storage = {
       log.length = settings.maxLogEntries;
     }
 
-    await chrome.storage.local.set({ [KEYS.LOG]: log });
+    await api.storage.local.set({ [KEYS.LOG]: log });
   },
 
   async clearLog() {
-    await chrome.storage.local.set({ [KEYS.LOG]: [] });
+    await api.storage.local.set({ [KEYS.LOG]: [] });
   },
 
   // --- Settings ---
 
   async getSettings() {
-    const result = await chrome.storage.local.get(KEYS.SETTINGS);
+    const result = await api.storage.local.get(KEYS.SETTINGS);
     return { ...DEFAULT_SETTINGS, ...(result[KEYS.SETTINGS] || {}) };
   },
 
   async saveSettings(settings) {
     const current = await this.getSettings();
-    await chrome.storage.local.set({
+    await api.storage.local.set({
       [KEYS.SETTINGS]: { ...current, ...settings },
     });
   },

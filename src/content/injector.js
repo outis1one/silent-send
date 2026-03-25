@@ -1,25 +1,33 @@
 /**
  * Silent Send - Content Script Injector
  *
- * This runs in Chrome's ISOLATED content script world, where it has
- * access to chrome.storage. It then injects the fetch-hooking code
- * into the MAIN page world so it can intercept the actual fetch() calls.
+ * Runs in the ISOLATED content script world, where it has access to
+ * browser/chrome.storage. Injects the fetch-hooking code into the
+ * MAIN page world so it can intercept the actual fetch() calls.
  *
  * Communication: page script <-> content script via window.postMessage
  */
 
 'use strict';
 
+// Cross-browser API
+const api =
+  typeof browser !== 'undefined' && browser.runtime
+    ? browser
+    : typeof chrome !== 'undefined'
+      ? chrome
+      : null;
+
 // Load mappings and settings, then inject into page
 async function init() {
-  const result = await chrome.storage.local.get(['ss_mappings', 'ss_settings']);
+  const result = await api.storage.local.get(['ss_mappings', 'ss_settings']);
   const mappings = result.ss_mappings || [];
   const settings = result.ss_settings || { enabled: true };
 
   // Inject the main interception script into the page's world
   const script = document.createElement('script');
   script.setAttribute('data-ss-config', JSON.stringify({ mappings, settings }));
-  script.src = chrome.runtime.getURL('src/content/content.js');
+  script.src = api.runtime.getURL('src/content/content.js');
   (document.head || document.documentElement).appendChild(script);
   script.onload = () => script.remove();
 
@@ -27,7 +35,7 @@ async function init() {
   window.addEventListener('message', (event) => {
     if (event.source !== window) return;
     if (event.data?.type === 'ss:substitution-performed') {
-      chrome.runtime.sendMessage({
+      api.runtime.sendMessage({
         type: 'substitution:performed',
         count: event.data.count,
         replacements: event.data.replacements,
@@ -36,7 +44,7 @@ async function init() {
   });
 
   // Forward storage changes to the page script
-  chrome.storage.onChanged.addListener((changes) => {
+  api.storage.onChanged.addListener((changes) => {
     if (changes.ss_mappings || changes.ss_settings) {
       window.postMessage({
         type: 'ss:config-updated',
@@ -47,7 +55,7 @@ async function init() {
   });
 
   // Listen for settings updates from popup via runtime messages
-  chrome.runtime.onMessage.addListener((message) => {
+  api.runtime.onMessage.addListener((message) => {
     if (message.type === 'settings:updated') {
       window.postMessage({
         type: 'ss:config-updated',

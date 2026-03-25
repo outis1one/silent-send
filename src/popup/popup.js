@@ -1,5 +1,6 @@
 import SubstitutionEngine from '../lib/substitution-engine.js';
 import Storage from '../lib/storage.js';
+import api from '../lib/browser-polyfill.js';
 
 // --- State ---
 let mappings = [];
@@ -37,7 +38,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     settings.enabled = e.target.checked;
     await Storage.saveSettings(settings);
     updateStatusDot();
-    chrome.runtime.sendMessage({
+    api.runtime.sendMessage({
       type: 'update:settings',
       settings,
     });
@@ -48,7 +49,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     settings.revealMode = !settings.revealMode;
     await Storage.saveSettings(settings);
     $('#btnReveal').classList.toggle('active', settings.revealMode);
-    chrome.runtime.sendMessage({
+    api.runtime.sendMessage({
       type: 'update:settings',
       settings,
     });
@@ -74,7 +75,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Options link
   $('#btnOptions').addEventListener('click', (e) => {
     e.preventDefault();
-    chrome.runtime.openOptionsPage();
+    api.runtime.openOptionsPage();
   });
 });
 

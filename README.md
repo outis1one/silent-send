@@ -18,16 +18,29 @@ A Chrome extension that intercepts personal information and substitutes it with 
 - **Reveal mode** (eye icon) toggles showing real vs substitute data in responses
 - **Browser DevTools** → Console shows `[Silent Send] Substituted N value(s)` messages
 
-## Installation (Developer Mode)
+## Installation
 
+### Chrome (Developer Mode)
 1. Clone this repo
-2. Open `chrome://extensions/` in Chrome
-3. Enable **Developer mode** (top right)
-4. Click **Load unpacked**
-5. Select this directory
+2. Run `./build.sh chrome` (or just use the root directory directly)
+3. Open `chrome://extensions/`
+4. Enable **Developer mode** (top right)
+5. Click **Load unpacked** → select `dist/chrome/` (or root dir)
 6. Navigate to claude.ai — the extension is active
 
-No build step needed. No Chrome Web Store required.
+### Firefox
+1. Clone this repo
+2. Run `./build.sh firefox`
+3. Open `about:debugging` → **This Firefox**
+4. Click **Load Temporary Add-on** → select `dist/firefox/manifest.json`
+5. Navigate to claude.ai — the extension is active
+
+For persistent Firefox installation, package and sign via `web-ext`:
+```
+cd dist/firefox && npx web-ext sign --api-key=YOUR_KEY --api-secret=YOUR_SECRET
+```
+
+No store required for either browser in developer mode.
 
 ## Architecture
 
@@ -46,11 +59,12 @@ src/
     options.html/css/js — Full mapping management, import/export, settings
   lib/
     substitution-engine.js — Core find/replace logic
-    storage.js          — Chrome storage wrapper
+    storage.js          — Browser storage wrapper
+    browser-polyfill.js — Chrome/Firefox API compatibility
 ```
 
 ## Privacy
 
-- All data stays local in Chrome storage
+- All data stays local in browser storage
 - No external servers, no telemetry, no analytics
 - The extension only activates on claude.ai

@@ -1,4 +1,5 @@
 import Storage from '../lib/storage.js';
+import api from '../lib/browser-polyfill.js';
 
 let mappings = [];
 let settings = {};
@@ -204,6 +205,20 @@ async function addDomain() {
   if (domains.includes(domain)) {
     alert('Domain already added.');
     return;
+  }
+
+  // Request browser permission for this domain
+  try {
+    const granted = await api.permissions.request({
+      origins: [domain + '/*'],
+    });
+    if (!granted) {
+      alert('Permission denied. The extension needs access to this domain to work.');
+      return;
+    }
+  } catch (e) {
+    // Firefox or older Chrome may not support optional permissions this way
+    console.warn('[Silent Send] Could not request permission:', e);
   }
 
   domains.push(domain);

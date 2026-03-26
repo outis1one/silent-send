@@ -446,12 +446,20 @@
   // ============================================================
   // Check if we have anything to substitute
   // ============================================================
-  function hasSubstitutions() {
+  // Check if the user has configured anything at all.
+  // If not, the extension is effectively disabled — no interception.
+  function isConfigured() {
     return mappings.length > 0 ||
       (identity.emails || []).length > 0 ||
       (identity.names || []).length > 0 ||
       (identity.usernames || []).length > 0 ||
-      (identity.phones || []).length > 0;
+      (identity.hostnames || []).length > 0 ||
+      (identity.phones || []).length > 0 ||
+      !!identity.catchAllEmail;
+  }
+
+  function hasSubstitutions() {
+    return isConfigured();
   }
 
   // ============================================================

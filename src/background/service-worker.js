@@ -264,9 +264,20 @@ function generateIcon(color, size) {
 }
 
 async function updateIcon(settings) {
+  // Check if identity is configured
+  const identity = await Storage.getIdentity();
+  const mappings = await Storage.getMappings();
+  const configured = mappings.length > 0 ||
+    (identity.emails || []).length > 0 ||
+    (identity.names || []).length > 0 ||
+    (identity.usernames || []).length > 0 ||
+    !!identity.catchAllEmail;
+
   let color;
   if (!settings.enabled) {
     color = '#dc2626'; // red — disabled
+  } else if (!configured) {
+    color = '#9ca3af'; // gray — not configured, effectively disabled
   } else if (settings.revealMode) {
     color = '#1d4ed8'; // blue — reveal mode
   } else {
@@ -285,10 +296,10 @@ async function updateIcon(settings) {
   }
 }
 
-// Update icon when settings change
+// Update icon when settings, identity, or mappings change
 api.storage.onChanged.addListener(async (changes) => {
-  if (changes.ss_settings) {
-    const settings = { ...(changes.ss_settings.newValue || {}) };
+  if (changes.ss_settings || changes.ss_identity || changes.ss_mappings) {
+    const settings = await Storage.getSettings();
     await updateIcon(settings);
   }
 });

@@ -276,6 +276,34 @@
         <div id="gistSyncStatus" style="font-size:12px;min-height:16px"></div>
       </div>
 
+      <!-- Auto Sync -->
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid #e5e7eb">
+        <h3 style="font-size:13px;font-weight:600;margin:0 0 4px">Auto Sync — background polling</h3>
+        <p class="section-desc" style="margin-bottom:8px">
+          Automatically push and pull settings on an interval. Uses the Gist or URL method configured above.
+        </p>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+          <label class="toggle" title="Enable auto sync">
+            <input type="checkbox" id="autoSyncEnabled">
+            <span class="toggle-slider"></span>
+          </label>
+          <select id="autoSyncMethod" style="font-size:12px;padding:3px 6px;border:1px solid #d1d5db;border-radius:4px">
+            <option value="gist">GitHub Gist</option>
+            <option value="url">Custom URL</option>
+          </select>
+          <div style="display:flex;align-items:center;gap:4px">
+            <label style="font-size:12px;white-space:nowrap">Every</label>
+            <select id="autoSyncInterval" style="font-size:12px;padding:3px 6px;border:1px solid #d1d5db;border-radius:4px">
+              <option value="5">5 min</option>
+              <option value="15" selected>15 min</option>
+              <option value="30">30 min</option>
+              <option value="60">1 hour</option>
+            </select>
+          </div>
+        </div>
+        <div id="autoSyncStatus" style="font-size:12px;min-height:16px"></div>
+      </div>
+
       <div style="margin-top:20px;padding-top:16px;border-top:1px solid #e5e7eb">
         <h3 style="font-size:13px;font-weight:600;margin:0 0 4px">Custom URL Sync</h3>
         <p class="section-desc" style="margin-bottom:8px">
@@ -295,6 +323,70 @@
         </div>
         <div id="urlSyncStatus" style="margin-top:6px;font-size:12px;min-height:16px"></div>
       </div>
+    </section>
+
+    <!-- Sync Conflicts -->
+    <section class="section" id="conflictSection" style="display:none">
+      <h2 style="color:#b45309">Sync Conflicts</h2>
+      <p class="section-desc">Both this device and another device changed the same data. Choose which version to keep for each conflict.</p>
+      <div id="conflictList"></div>
+    </section>
+
+    <!-- Connected Devices -->
+    <section class="section">
+      <h2>Connected Devices</h2>
+      <p class="section-desc">Devices that sync with this extension. The device list is shared via sync data.</p>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+        <label style="font-size:12px;white-space:nowrap">This device:</label>
+        <input type="text" id="deviceName" placeholder="Device name" style="flex:1;font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px">
+        <button class="btn btn-sm" id="btnRenameDevice">Rename</button>
+      </div>
+      <div id="deviceList" style="font-size:13px"></div>
+    </section>
+
+    <!-- Version History -->
+    <section class="section">
+      <h2>Version History</h2>
+      <p class="section-desc">Snapshots of your data are saved automatically on each sync. Restore a previous version if a sync overwrote something important.</p>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+        <label style="font-size:12px;white-space:nowrap">Max snapshots</label>
+        <input type="number" id="maxVersionHistory" class="input-small" min="3" max="50" value="10">
+        <button class="btn btn-sm btn-danger" id="btnClearVersionHistory">Clear History</button>
+      </div>
+      <div id="versionHistoryList" style="font-size:13px"></div>
+    </section>
+
+    <!-- Organization -->
+    <section class="section">
+      <h2>Organization</h2>
+      <p class="section-desc">Join an organization to receive required substitution rules and secret scanner patterns from your admin. Org rules merge with your personal rules and cannot be disabled.</p>
+
+      <div id="orgNotJoined">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+          <input type="text" id="orgInviteCode" placeholder="Invite code" style="flex:1;min-width:140px;font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;font-family:monospace">
+          <button class="btn btn-primary" id="btnJoinOrgCode">Join</button>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+          <input type="url" id="orgPolicyUrl" placeholder="Policy URL (https://…/policy.json)" style="flex:1;min-width:200px;font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px">
+          <button class="btn" id="btnJoinOrgUrl">Join by URL</button>
+        </div>
+      </div>
+
+      <div id="orgJoined" style="display:none">
+        <div style="padding:10px;background:#f0fdf4;border:1px solid #86efac;border-radius:6px;margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <div>
+              <strong id="orgNameDisplay" style="font-size:13px"></strong>
+              <span id="orgPolicyVersion" style="font-size:11px;color:#6b7280;margin-left:6px"></span>
+            </div>
+            <button class="btn btn-sm btn-danger" id="btnLeaveOrg">Leave</button>
+          </div>
+          <div id="orgComplianceStatus" style="font-size:12px;margin-top:6px"></div>
+          <div id="orgRequiredMappings" style="font-size:11px;color:#6b7280;margin-top:4px"></div>
+        </div>
+      </div>
+
+      <div id="orgStatus" style="font-size:12px;min-height:16px"></div>
     </section>
 
     <section class="section">
@@ -379,6 +471,46 @@
 
     <section class="section">
       <h2>Danger Zone</h2>
+
+      <!-- Tamper Protection -->
+      <div style="margin-bottom:16px;padding:12px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px">
+        <h3 style="font-size:13px;font-weight:600;margin:0 0 6px">Tamper Protection</h3>
+        <p class="section-desc" style="margin-bottom:8px">
+          Require a separate admin password to disable the extension, clear data, or change org settings.
+          This is a deterrent — it cannot prevent browser-level uninstall or dev tools access.
+        </p>
+        <div id="tamperNotEnabled">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+            <input type="password" id="tamperAdminPassword" placeholder="Admin password" autocomplete="new-password"
+              style="flex:1;min-width:120px;font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px">
+            <input type="password" id="tamperAdminPasswordConfirm" placeholder="Confirm" autocomplete="new-password"
+              style="flex:1;min-width:120px;font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px">
+            <button class="btn btn-primary btn-sm" id="btnEnableTamper">Enable</button>
+          </div>
+        </div>
+        <div id="tamperEnabled" style="display:none">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="font-size:12px;color:#dc2626;font-weight:500">&#128274; Active</span>
+            <button class="btn btn-sm" id="btnChangeTamperPassword">Change Password</button>
+            <button class="btn btn-sm btn-danger" id="btnDisableTamper">Disable</button>
+          </div>
+        </div>
+        <div id="tamperStatus" style="font-size:12px;margin-top:4px;min-height:14px"></div>
+      </div>
+
+      <!-- Admin auth dialog (reusable prompt for protected actions) -->
+      <dialog id="adminAuthDialog" style="border:1px solid #d1d5db;border-radius:8px;padding:20px;max-width:300px">
+        <h3 style="margin:0 0 8px;font-size:14px">Admin Password Required</h3>
+        <p id="adminAuthReason" style="font-size:12px;color:#6b7280;margin:0 0 12px"></p>
+        <input type="password" id="adminAuthInput" placeholder="Admin password" autocomplete="current-password"
+          style="width:100%;box-sizing:border-box;font-size:13px;padding:8px;border:1px solid #d1d5db;border-radius:6px;margin-bottom:8px">
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-sm" id="btnAdminAuthCancel">Cancel</button>
+          <button class="btn btn-primary btn-sm" id="btnAdminAuthSubmit">Confirm</button>
+        </div>
+        <div id="adminAuthStatus" style="font-size:11px;margin-top:4px;min-height:14px;color:#dc2626"></div>
+      </dialog>
+
       <div class="setting-row">
         <div>
           <label>Reset all data</label>

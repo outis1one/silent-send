@@ -1,6 +1,10 @@
 import Storage from '../lib/storage.js';
 import SilentSendCrypto from '../lib/crypto.js';
 import SilentSendSync from '../lib/sync.js';
+import VersionHistory from '../lib/version-history.js';
+import SilentSendMerge from '../lib/merge.js';
+import OrgPolicy from '../lib/org-policy.js';
+import TamperGuard from '../lib/tamper-guard.js';
 import api from '../lib/browser-polyfill.js';
 
 let mappings = [];
@@ -24,6 +28,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderMappings();
   renderDomains();
   renderLog();
+
+  // --- New features ---
+  await initAutoSyncUI();
+  await initVersionHistoryUI();
+  await initDeviceDashboard();
+  await initOrgUI();
+  await initTamperUI();
+  await checkConflicts();
 
   // --- Sync Encryption UI ---
   await initSyncEncryptionUI();
@@ -1048,6 +1060,446 @@ function setSyncAuthStatus(msg, type) {
   el.textContent = msg;
   el.style.color = type === 'ok' ? '#10b981' : type === 'warn' ? '#f59e0b' : type === 'error' ? '#dc2626' : '#6b7280';
 }
+
+// ----------------------------------------------------------------
+// Auto Sync UI
+// ----------------------------------------------------------------
+
+async function initAutoSyncUI() {
+  const config = await SilentSendSync.getAutoSyncConfig();
+  if (config) {
+    $('#autoSyncEnabled').checked = config.enabled || false;
+    $('#autoSyncMethod').value = config.method || 'gist';
+    $('#autoSyncInterval').value = String(config.interval || 15);
+    if (config.lastPull) {
+      setAutoSyncStatus(`Last pull: ${new Date(config.lastPull).toLocaleString()}`, 'ok');
+    }
+  }
+
+  const saveAutoSync = async () => {
+    const config = (await SilentSendSync.getAutoSyncConfig()) || {};
+    config.enabled = $('#autoSyncEnabled').checked;
+    config.method = $('#autoSyncMethod').value;
+    config.interval = parseInt($('#autoSyncInterval').value, 10) || 15;
+
+    // Inherit token/URL from existing fields
+    if (config.method === 'gist') {
+      const token = $('#gistToken').value.trim();
+      if (token) config.gistToken = token;
+    } else {
+      config.url = $('#customSyncUrl').value.trim();
+      config.headers = parseHeadersField($('#customSyncHeaders').value);
+    }
+
+    await SilentSendSync.saveAutoSyncConfig(config);
+    // Tell service worker to reconfigure alarm
+    api.runtime.sendMessage({ type: 'autosync:config-changed' }).catch(() => {});
+    setAutoSyncStatus(config.enabled ? 'Auto sync enabled.' : 'Auto sync disabled.', config.enabled ? 'ok' : 'neutral');
+  };
+
+  $('#autoSyncEnabled').addEventListener('change', saveAutoSync);
+  $('#autoSyncMethod').addEventListener('change', saveAutoSync);
+  $('#autoSyncInterval').addEventListener('change', saveAutoSync);
+}
+
+function setAutoSyncStatus(msg, type) {
+  const el = $('#autoSyncStatus');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = type === 'ok' ? '#10b981' : type === 'warn' ? '#f59e0b' : type === 'error' ? '#dc2626' : '#6b7280';
+}
+
+// ----------------------------------------------------------------
+// Version History UI
+// ----------------------------------------------------------------
+
+async function initVersionHistoryUI() {
+  $('#maxVersionHistory').value = settings.maxVersionHistory || 10;
+  $('#maxVersionHistory').addEventListener('change', async (e) => {
+    await Storage.saveSettings({ maxVersionHistory: parseInt(e.target.value, 10) || 10 });
+  });
+
+  $('#btnClearVersionHistory').addEventListener('click', async () => {
+    if (!confirm('Clear all version history snapshots?')) return;
+    await VersionHistory.clearAll();
+    renderVersionHistory();
+  });
+
+  await renderVersionHistory();
+}
+
+async function renderVersionHistory() {
+  const list = $('#versionHistoryList');
+  const snapshots = await VersionHistory.getSnapshots();
+
+  if (snapshots.length === 0) {
+    list.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:12px">No snapshots yet. Snapshots are created on each sync.</div>';
+    return;
+  }
+
+  list.innerHTML = snapshots.map(s => {
+    const time = new Date(s.timestamp).toLocaleString();
+    const mappingCount = (s.data?.mappings || []).length;
+    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px;background:#f9fafb;border-radius:6px;margin-bottom:4px">
+      <div>
+        <span style="font-size:12px;font-weight:500">${time}</span>
+        <span style="font-size:11px;color:#6b7280;margin-left:8px">via ${escapeHtml(s.source || 'unknown')}</span>
+        <span style="font-size:11px;color:#9ca3af;margin-left:8px">${mappingCount} mappings</span>
+      </div>
+      <button class="btn btn-sm btn-restore-snapshot" data-id="${s.id}">Restore</button>
+    </div>`;
+  }).join('');
+
+  list.querySelectorAll('.btn-restore-snapshot').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = parseInt(btn.dataset.id, 10);
+      if (!confirm('Restore this snapshot? Current data will be overwritten.')) return;
+      const snapshot = await VersionHistory.getSnapshot(id);
+      if (snapshot?.data) {
+        await SilentSendSync._applyData(snapshot.data, 'rollback');
+        mappings = await Storage.getMappings();
+        settings = await Storage.getSettings();
+        renderMappings();
+        renderDomains();
+        renderLog();
+        alert('Restored. Reload open AI tabs for changes to take effect.');
+      }
+    });
+  });
+}
+
+// ----------------------------------------------------------------
+// Connected Devices UI
+// ----------------------------------------------------------------
+
+async function initDeviceDashboard() {
+  const deviceInfo = await SilentSendSync.getDeviceInfo();
+  $('#deviceName').value = deviceInfo.name;
+
+  $('#btnRenameDevice').addEventListener('click', async () => {
+    const name = $('#deviceName').value.trim();
+    if (!name) return;
+    await SilentSendSync.setDeviceName(name);
+    renderDevices();
+  });
+
+  await renderDevices();
+}
+
+async function renderDevices() {
+  const list = $('#deviceList');
+  const devices = await SilentSendSync.getDevices();
+  const currentDevice = await SilentSendSync.getDeviceInfo();
+  const entries = Object.values(devices);
+
+  if (entries.length === 0) {
+    list.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:12px">No devices synced yet. Push or pull to register this device.</div>';
+    return;
+  }
+
+  entries.sort((a, b) => (b.lastSync || 0) - (a.lastSync || 0));
+
+  list.innerHTML = `<table style="width:100%;font-size:12px;border-collapse:collapse">
+    <thead><tr style="text-align:left;border-bottom:1px solid #e5e7eb">
+      <th style="padding:6px">Device</th>
+      <th style="padding:6px">Browser</th>
+      <th style="padding:6px">Last Sync</th>
+      <th style="padding:6px"></th>
+    </tr></thead>
+    <tbody>${entries.map(d => {
+      const isCurrent = d.id === currentDevice.id;
+      const lastSync = d.lastSync ? new Date(d.lastSync).toLocaleString() : 'Never';
+      return `<tr style="border-bottom:1px solid #f3f4f6">
+        <td style="padding:6px">${escapeHtml(d.name || 'Unknown')} ${isCurrent ? '<span style="color:#10b981;font-size:10px">(this)</span>' : ''}</td>
+        <td style="padding:6px">${escapeHtml(d.browser || '?')}</td>
+        <td style="padding:6px">${lastSync}</td>
+        <td style="padding:6px">${!isCurrent ? `<button class="btn btn-sm btn-danger btn-remove-device" data-id="${d.id}">&times;</button>` : ''}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+
+  list.querySelectorAll('.btn-remove-device').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      await SilentSendSync.removeDevice(btn.dataset.id);
+      renderDevices();
+    });
+  });
+}
+
+// ----------------------------------------------------------------
+// Organization UI
+// ----------------------------------------------------------------
+
+async function initOrgUI() {
+  const inOrg = await OrgPolicy.isInOrg();
+  if (inOrg) {
+    await showOrgJoined();
+  } else {
+    showOrgNotJoined();
+  }
+
+  $('#btnJoinOrgCode').addEventListener('click', async () => {
+    const code = $('#orgInviteCode').value.trim();
+    if (!code) { setOrgStatus('Enter an invite code.', 'warn'); return; }
+    setOrgStatus('Joining...', 'neutral');
+    const result = await OrgPolicy.joinOrg({ inviteCode: code });
+    if (result.success) {
+      setOrgStatus(`Joined ${result.orgName}.`, 'ok');
+      await showOrgJoined();
+    } else {
+      setOrgStatus('Failed: ' + result.reason, 'error');
+    }
+  });
+
+  $('#btnJoinOrgUrl').addEventListener('click', async () => {
+    const url = $('#orgPolicyUrl').value.trim();
+    if (!url) { setOrgStatus('Enter a policy URL.', 'warn'); return; }
+    setOrgStatus('Joining...', 'neutral');
+    const result = await OrgPolicy.joinOrg({ policyUrl: url });
+    if (result.success) {
+      setOrgStatus(`Joined ${result.orgName}.`, 'ok');
+      await showOrgJoined();
+    } else {
+      setOrgStatus('Failed: ' + result.reason, 'error');
+    }
+  });
+
+  $('#btnLeaveOrg').addEventListener('click', async () => {
+    // Check tamper protection
+    if (await TamperGuard.isActionProtected('changeOrgPolicy')) {
+      const pw = await promptAdminPassword('Leave organization');
+      if (!pw) return;
+      const auth = await TamperGuard.verify(pw);
+      if (!auth) { setOrgStatus('Wrong admin password.', 'error'); return; }
+    }
+    if (!confirm('Leave this organization? Org-required mappings will be removed.')) return;
+    await OrgPolicy.leaveOrg();
+    showOrgNotJoined();
+    setOrgStatus('Left organization.', 'neutral');
+  });
+}
+
+async function showOrgJoined() {
+  $('#orgNotJoined').style.display = 'none';
+  $('#orgJoined').style.display = 'block';
+
+  const config = await OrgPolicy.getOrgConfig();
+  const policy = await OrgPolicy.getPolicy();
+  if (config) {
+    $('#orgNameDisplay').textContent = config.orgName;
+    $('#orgPolicyVersion').textContent = `v${policy?.version || '?'}`;
+  }
+
+  const compliance = await OrgPolicy.checkCompliance();
+  const statusEl = $('#orgComplianceStatus');
+  if (compliance.compliant) {
+    statusEl.innerHTML = '<span style="color:#10b981">&#10003; Compliant — all required fields configured</span>';
+  } else {
+    statusEl.innerHTML = `<span style="color:#b45309">Missing: ${compliance.missing.join(', ')}</span>`;
+  }
+
+  const reqMappings = policy?.requiredMappings || [];
+  const reqEl = $('#orgRequiredMappings');
+  if (reqMappings.length > 0) {
+    reqEl.textContent = `${reqMappings.length} required mapping(s) enforced by org policy`;
+  } else {
+    reqEl.textContent = '';
+  }
+}
+
+function showOrgNotJoined() {
+  $('#orgNotJoined').style.display = 'block';
+  $('#orgJoined').style.display = 'none';
+}
+
+function setOrgStatus(msg, type) {
+  const el = $('#orgStatus');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = type === 'ok' ? '#10b981' : type === 'warn' ? '#f59e0b' : type === 'error' ? '#dc2626' : '#6b7280';
+}
+
+// ----------------------------------------------------------------
+// Tamper Protection UI
+// ----------------------------------------------------------------
+
+async function initTamperUI() {
+  const enabled = await TamperGuard.isEnabled();
+  if (enabled) {
+    $('#tamperNotEnabled').style.display = 'none';
+    $('#tamperEnabled').style.display = 'block';
+  }
+
+  $('#btnEnableTamper').addEventListener('click', async () => {
+    const pw = $('#tamperAdminPassword').value;
+    const confirm = $('#tamperAdminPasswordConfirm').value;
+    if (!pw) { setTamperStatus('Enter a password.', 'warn'); return; }
+    if (pw !== confirm) { setTamperStatus('Passwords do not match.', 'error'); return; }
+
+    const result = await TamperGuard.setup(pw);
+    if (result.success) {
+      $('#tamperNotEnabled').style.display = 'none';
+      $('#tamperEnabled').style.display = 'block';
+      $('#tamperAdminPassword').value = '';
+      $('#tamperAdminPasswordConfirm').value = '';
+      setTamperStatus('Tamper protection enabled.', 'ok');
+    } else {
+      setTamperStatus(result.reason, 'error');
+    }
+  });
+
+  $('#btnDisableTamper').addEventListener('click', async () => {
+    const pw = await promptAdminPassword('Disable tamper protection');
+    if (!pw) return;
+    const result = await TamperGuard.disable(pw);
+    if (result.success) {
+      $('#tamperNotEnabled').style.display = 'block';
+      $('#tamperEnabled').style.display = 'none';
+      setTamperStatus('Tamper protection disabled.', 'neutral');
+    } else {
+      setTamperStatus(result.reason, 'error');
+    }
+  });
+
+  $('#btnChangeTamperPassword').addEventListener('click', async () => {
+    const oldPw = await promptAdminPassword('Change admin password');
+    if (!oldPw) return;
+    const newPw = window.prompt('Enter new admin password:');
+    if (!newPw) return;
+    const confirmPw = window.prompt('Confirm new admin password:');
+    if (newPw !== confirmPw) { setTamperStatus('Passwords do not match.', 'error'); return; }
+    const result = await TamperGuard.changePassword(oldPw, newPw);
+    if (result.success) {
+      setTamperStatus('Admin password changed.', 'ok');
+    } else {
+      setTamperStatus(result.reason, 'error');
+    }
+  });
+}
+
+function setTamperStatus(msg, type) {
+  const el = $('#tamperStatus');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = type === 'ok' ? '#10b981' : type === 'warn' ? '#f59e0b' : type === 'error' ? '#dc2626' : '#6b7280';
+}
+
+/**
+ * Show the admin auth dialog and return the password, or null if cancelled.
+ */
+function promptAdminPassword(reason) {
+  return new Promise((resolve) => {
+    const dialog = $('#adminAuthDialog');
+    $('#adminAuthReason').textContent = reason;
+    $('#adminAuthInput').value = '';
+    $('#adminAuthStatus').textContent = '';
+    dialog.showModal();
+
+    const submit = () => {
+      const pw = $('#adminAuthInput').value;
+      if (!pw) {
+        $('#adminAuthStatus').textContent = 'Enter password.';
+        return;
+      }
+      dialog.close();
+      cleanup();
+      resolve(pw);
+    };
+
+    const cancel = () => {
+      dialog.close();
+      cleanup();
+      resolve(null);
+    };
+
+    const onKey = (e) => { if (e.key === 'Enter') submit(); };
+
+    const cleanup = () => {
+      $('#btnAdminAuthSubmit').removeEventListener('click', submit);
+      $('#btnAdminAuthCancel').removeEventListener('click', cancel);
+      $('#adminAuthInput').removeEventListener('keydown', onKey);
+    };
+
+    $('#btnAdminAuthSubmit').addEventListener('click', submit);
+    $('#btnAdminAuthCancel').addEventListener('click', cancel);
+    $('#adminAuthInput').addEventListener('keydown', onKey);
+    setTimeout(() => $('#adminAuthInput').focus(), 100);
+  });
+}
+
+// ----------------------------------------------------------------
+// Conflict Resolution UI
+// ----------------------------------------------------------------
+
+async function checkConflicts() {
+  const result = await api.storage.local.get('ss_sync_conflicts');
+  const conflicts = result.ss_sync_conflicts || [];
+  const section = $('#conflictSection');
+
+  if (conflicts.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+
+  section.style.display = 'block';
+  renderConflicts(conflicts);
+}
+
+function renderConflicts(conflicts) {
+  const list = $('#conflictList');
+  list.innerHTML = conflicts.map(c => `
+    <div style="padding:10px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;margin-bottom:8px" data-conflict-id="${c.id}">
+      <div style="font-size:12px;font-weight:500;margin-bottom:6px">${escapeHtml(c.path)}</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px">
+        <div style="flex:1;min-width:120px">
+          <div style="font-size:10px;color:#6b7280;margin-bottom:2px">LOCAL (this device)</div>
+          <code style="font-size:11px;background:#f3f4f6;padding:4px 6px;border-radius:4px;display:block;word-break:break-all">${escapeHtml(JSON.stringify(c.localValue))}</code>
+        </div>
+        <div style="flex:1;min-width:120px">
+          <div style="font-size:10px;color:#6b7280;margin-bottom:2px">REMOTE (other device)</div>
+          <code style="font-size:11px;background:#f3f4f6;padding:4px 6px;border-radius:4px;display:block;word-break:break-all">${escapeHtml(JSON.stringify(c.remoteValue))}</code>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm btn-primary btn-resolve" data-id="${c.id}" data-choice="local">Keep Local</button>
+        <button class="btn btn-sm btn-resolve" data-id="${c.id}" data-choice="remote">Keep Remote</button>
+      </div>
+    </div>
+  `).join('');
+
+  list.querySelectorAll('.btn-resolve').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const conflictId = btn.dataset.id;
+      const choice = btn.dataset.choice;
+
+      const result = await api.storage.local.get('ss_sync_conflicts');
+      const conflicts = result.ss_sync_conflicts || [];
+      const conflict = conflicts.find(c => c.id === conflictId);
+
+      if (conflict) {
+        // Apply resolution
+        const local = await SilentSendSync._getAllData();
+        SilentSendMerge.resolveConflict(local, conflict, choice);
+        await SilentSendSync._applyData(local, 'conflict-resolution');
+
+        // Remove resolved conflict
+        const remaining = conflicts.filter(c => c.id !== conflictId);
+        await api.storage.local.set({ ss_sync_conflicts: remaining });
+
+        // Refresh
+        mappings = await Storage.getMappings();
+        settings = await Storage.getSettings();
+        renderMappings();
+        renderDomains();
+        checkConflicts();
+      }
+    });
+  });
+}
+
+// ----------------------------------------------------------------
+// Utility
+// ----------------------------------------------------------------
 
 function escapeHtml(str) {
   const div = document.createElement('div');

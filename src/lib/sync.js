@@ -874,6 +874,165 @@ const SilentSendSync = {
       });
     } catch { /* ignore */ }
   },
+
+  // ----------------------------------------------------------------
+  // Auto Sync — background polling for Gist/URL
+  //
+  // Config stored in ss_auto_sync_config (encrypted at rest).
+  // Uses chrome.alarms API for MV3-safe periodic polling.
+  // ----------------------------------------------------------------
+
+  async getAutoSyncConfig() {
+    const result = await api.storage.local.get('ss_auto_sync_config');
+    return result.ss_auto_sync_config || null;
+  },
+
+  async saveAutoSyncConfig(config) {
+    await api.storage.local.set({ ss_auto_sync_config: config });
+  },
+
+  /**
+   * Perform an auto-sync cycle: pull from remote, push if local changed.
+   * Called by the alarms listener in the service worker.
+   *
+   * @returns {{ pulled: boolean, pushed: boolean, error?: string }}
+   */
+  async performAutoSync() {
+    const config = await this.getAutoSyncConfig();
+    if (!config?.enabled) return { pulled: false, pushed: false };
+
+    let pulled = false;
+    let pushed = false;
+    let error = null;
+
+    try {
+      if (config.method === 'gist' && config.gistToken) {
+        // Pull from Gist
+        const pullResult = await this.pullFromGist(config.gistToken);
+        if (pullResult.success && pullResult.imported) pulled = true;
+
+        // Push if local data changed since last push
+        const local = await this._getAllData();
+        if (!config.lastPush || local.lastModified > config.lastPush) {
+          const pushResult = await this.pushToGist(config.gistToken);
+          if (pushResult.success) {
+            pushed = true;
+            config.lastPush = Date.now();
+          }
+        }
+      } else if (config.method === 'url' && config.url) {
+        // Pull from URL
+        const headers = config.headers || {};
+        const pullResult = await this.pullFromUrl({ url: config.url, headers });
+        if (pullResult.success && pullResult.imported) pulled = true;
+
+        // Push if local data changed since last push
+        const local = await this._getAllData();
+        if (!config.lastPush || local.lastModified > config.lastPush) {
+          const pushResult = await this.pushToUrl({
+            url: config.url,
+            method: config.httpMethod || 'PUT',
+            headers,
+          });
+          if (pushResult.success) {
+            pushed = true;
+            config.lastPush = Date.now();
+          }
+        }
+      }
+
+      // Update timestamps
+      config.lastPull = Date.now();
+      await this.saveAutoSyncConfig(config);
+    } catch (e) {
+      error = e.message;
+    }
+
+    return { pulled, pushed, error };
+  },
+
+  // ----------------------------------------------------------------
+  // Multi-Device Dashboard
+  //
+  // Each device registers itself with a unique ID + name.
+  // Device list is embedded in the sync data so all devices
+  // see each other.
+  // ----------------------------------------------------------------
+
+  /**
+   * Get or create device info for this device.
+   */
+  async getDeviceInfo() {
+    const result = await api.storage.local.get('ss_device_info');
+    if (result.ss_device_info) return result.ss_device_info;
+
+    // Auto-detect device name
+    const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+    let browser = 'Unknown';
+    if (ua.includes('Firefox')) browser = 'Firefox';
+    else if (ua.includes('Chrome')) browser = 'Chrome';
+    else if (ua.includes('Safari')) browser = 'Safari';
+    else if (ua.includes('Edge')) browser = 'Edge';
+
+    const platform = typeof navigator !== 'undefined'
+      ? (navigator.platform || navigator.userAgentData?.platform || 'Unknown')
+      : 'Unknown';
+
+    const info = {
+      id: crypto.randomUUID(),
+      name: `${browser} on ${platform}`,
+      browser,
+      platform,
+      createdAt: Date.now(),
+      lastSync: Date.now(),
+    };
+
+    await api.storage.local.set({ ss_device_info: info });
+    return info;
+  },
+
+  /**
+   * Rename this device.
+   */
+  async setDeviceName(name) {
+    const info = await this.getDeviceInfo();
+    info.name = name;
+    await api.storage.local.set({ ss_device_info: info });
+  },
+
+  /**
+   * Get the list of all known devices.
+   */
+  async getDevices() {
+    const result = await api.storage.local.get('ss_devices');
+    return result.ss_devices || {};
+  },
+
+  /**
+   * Remove a device from the tracked list.
+   */
+  async removeDevice(deviceId) {
+    const devices = await this.getDevices();
+    delete devices[deviceId];
+    await api.storage.local.set({ ss_devices: devices });
+  },
+
+  // Override _getAllData to include device info and device list
+  async _getAllDataWithDevices() {
+    const data = await this._getAllData();
+    const deviceInfo = await this.getDeviceInfo();
+    const devices = await this.getDevices();
+
+    // Register/update this device in the list
+    devices[deviceInfo.id] = {
+      ...deviceInfo,
+      lastSync: Date.now(),
+    };
+    await api.storage.local.set({ ss_devices: devices });
+
+    data.devices = devices;
+    return data;
+  },
 };
 
 export default SilentSendSync;

@@ -22,10 +22,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   identity = await Storage.getIdentity();
   settings = await Storage.getSettings();
 
-  // Initialize profiles — create default if none exist
+  // Initialize profiles — create default with first+last name rows
   if (profiles.length === 0) {
     const p = await Storage.addProfile('Personal');
-    profiles = [p];
+    // Pre-populate with first and last name rows
+    await Storage.updateProfile(p.id, {
+      names: [
+        { real: '', substitute: '', type: 'first' },
+        { real: '', substitute: '', type: 'last' },
+      ],
+    });
+    profiles = await Storage.getProfiles();
   }
   currentProfileId = profiles[0].id;
 
@@ -99,6 +106,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     const name = prompt('Profile name:', `Profile ${profiles.length + 1}`);
     if (!name) return;
     const p = await Storage.addProfile(name);
+    // Pre-populate with first+last name rows
+    await Storage.updateProfile(p.id, {
+      names: [
+        { real: '', substitute: '', type: 'first' },
+        { real: '', substitute: '', type: 'last' },
+      ],
+    });
     profiles = await Storage.getProfiles();
     currentProfileId = p.id;
     renderProfileSelector();
@@ -342,6 +356,47 @@ function readFieldEntries(fieldName) {
   return entries;
 }
 
+// Track unsaved changes
+let identityDirty = false;
+
+function markDirty() {
+  if (!identityDirty) {
+    identityDirty = true;
+    const btn = $('#btnSaveIdentity');
+    btn.textContent = 'Save Identity *';
+    btn.style.background = '#b45309';
+  }
+}
+
+function markClean() {
+  identityDirty = false;
+  const btn = $('#btnSaveIdentity');
+  btn.textContent = 'Saved!';
+  btn.style.background = '#059669';
+  setTimeout(() => {
+    if (!identityDirty) {
+      btn.textContent = 'Save Identity';
+      btn.style.background = '';
+    }
+  }, 1500);
+}
+
+// Listen for input changes in identity tab to mark dirty
+document.addEventListener('input', (e) => {
+  const target = e.target;
+  if (target.closest('#tab-identity')) {
+    markDirty();
+  }
+}, true);
+
+// Listen for Enter key in identity fields to save
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.closest('#tab-identity')) {
+    e.preventDefault();
+    saveIdentity();
+  }
+}, true);
+
 async function saveIdentity() {
   const profileData = {
     names: readFieldEntries('names'),
@@ -358,15 +413,7 @@ async function saveIdentity() {
   profiles = await Storage.getProfiles();
   identity = await Storage.getIdentity();
   checkFirstRun();
-
-  // Flash save button
-  const btn = $('#btnSaveIdentity');
-  btn.textContent = 'Saved!';
-  btn.style.background = '#059669';
-  setTimeout(() => {
-    btn.textContent = 'Save Identity';
-    btn.style.background = '';
-  }, 1500);
+  markClean();
 }
 
 // --- First-Run Check ---

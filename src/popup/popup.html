@@ -141,13 +141,33 @@
 
     <!-- Test Tab -->
     <section class="tab-content" id="tab-test">
-      <p class="help-text">Type text containing your real values to see what would be sent.</p>
-      <textarea id="testInput" class="textarea" placeholder="Try: My name is John Smith, email john@gmail.com, logged in as jsmith@macbook-pro" rows="4"></textarea>
-      <div class="diff-view" id="diffView">
-        <div class="diff-label">What gets sent:</div>
-        <div class="diff-output" id="diffOutput"></div>
+      <div class="test-mode-toggle">
+        <button class="test-mode-btn active" data-mode="strip">Strip (real &rarr; fake)</button>
+        <button class="test-mode-btn" data-mode="reveal">Reveal (fake &rarr; real)</button>
       </div>
-      <div class="diff-stats" id="diffStats"></div>
+
+      <div id="stripMode">
+        <p class="help-text">Paste text with your real info. See what gets sent.</p>
+        <textarea id="testInput" class="textarea" placeholder="Try: My name is John Smith, email john@gmail.com, logged in as jsmith@macbook-pro" rows="4"></textarea>
+        <div class="diff-view" id="diffView">
+          <div class="diff-label">What gets sent:</div>
+          <div class="diff-output" id="diffOutput"></div>
+        </div>
+        <div class="diff-stats" id="diffStats"></div>
+      </div>
+
+      <div id="revealMode" style="display:none">
+        <p class="help-text">Paste text from AI responses (with fake data). Get back real data to copy.</p>
+        <textarea id="revealInput" class="textarea" placeholder="Paste AI output here, e.g.: Hello Alex Demo, I see your project at /home/ademo/..." rows="4"></textarea>
+        <div class="diff-view" id="revealView">
+          <div class="diff-label">Your real data:</div>
+          <div class="diff-output" id="revealOutput"></div>
+        </div>
+        <button class="btn btn-primary" id="btnCopyRevealed" style="width:100%;margin-top:8px">Copy to Clipboard</button>
+        <div class="diff-stats" id="revealStats"></div>
+      </div>
+
+      <div class="test-identity-status" id="identityStatus"></div>
     </section>
 
     <!-- Footer -->

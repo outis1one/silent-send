@@ -34,6 +34,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       $(`#tab-${tab.dataset.tab}`).classList.add('active');
 
       if (tab.dataset.tab === 'activity') renderActivity();
+      if (tab.dataset.tab === 'test') {
+        // Reload identity from storage in case it was just saved
+        Storage.getIdentity().then((id) => {
+          identity = id;
+          updateIdentityStatus();
+        });
+      }
     });
   });
 
@@ -76,8 +83,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderActivity();
   });
 
-  // Test tab - live diff
+  // Test tab - live diff + reveal
   $('#testInput').addEventListener('input', renderTestDiff);
+  $('#revealInput').addEventListener('input', renderRevealDiff);
+  $('#btnCopyRevealed').addEventListener('click', copyRevealedText);
+
+  // Test mode toggle (strip vs reveal)
+  $$('.test-mode-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      $$('.test-mode-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      const mode = btn.dataset.mode;
+      $('#stripMode').style.display = mode === 'strip' ? 'block' : 'none';
+      $('#revealMode').style.display = mode === 'reveal' ? 'block' : 'none';
+    });
+  });
 
   // Options link
   $('#btnOptions').addEventListener('click', (e) => {
@@ -297,8 +317,7 @@ async function renderActivity() {
     .join('');
 }
 
-// --- Test Diff ---
-// Runs both smart patterns AND explicit mappings, shows combined result
+// --- Test Diff (Strip: real → fake) ---
 function renderTestDiff() {
   const input = $('#testInput').value;
   const output = $('#diffOutput');
@@ -310,39 +329,27 @@ function renderTestDiff() {
     return;
   }
 
-  // Smart patterns first (broader catches), then explicit mappings (specific overrides)
   const smartResult = SmartPatterns.substitute(input, identity);
   const explicitResult = SubstitutionEngine.substitute(smartResult.text, mappings);
 
   const allReplacements = [...smartResult.replacements, ...explicitResult.replacements];
   const finalText = explicitResult.text;
 
-  // Simple diff: highlight differences
   if (finalText === input) {
     output.textContent = input;
     stats.textContent = 'No substitutions detected';
     return;
   }
 
-  // Build a visual diff by running smart patterns on original to find positions
-  // For display, we re-run on the original to get positions
-  const smartPositions = findReplacementPositions(input, identity, mappings);
-
-  if (smartPositions.length === 0) {
-    output.textContent = finalText;
-  } else {
-    // Build highlighted output from the final text
-    // Simpler approach: show the final text with replaced values highlighted
-    let html = escapeHtml(finalText);
-    for (const r of allReplacements) {
-      const escapedReplaced = escapeHtml(r.replaced);
-      html = html.replace(
-        escapedReplaced,
-        `<span class="sub-highlight" title="Was: ${escapeHtml(r.original)} [${r.pattern || r.category}]">${escapedReplaced}</span>`
-      );
-    }
-    output.innerHTML = html;
+  let html = escapeHtml(finalText);
+  for (const r of allReplacements) {
+    const escapedReplaced = escapeHtml(r.replaced);
+    html = html.replace(
+      escapedReplaced,
+      `<span class="sub-highlight" title="Was: ${escapeHtml(r.original)} [${r.pattern || r.category}]">${escapedReplaced}</span>`
+    );
   }
+  output.innerHTML = html;
 
   const smartCount = smartResult.replacements.length;
   const explicitCount = explicitResult.replacements.length;
@@ -352,13 +359,132 @@ function renderTestDiff() {
   stats.textContent = `${allReplacements.length} substitution${allReplacements.length !== 1 ? 's' : ''} (${parts.join(', ')})`;
 }
 
-function findReplacementPositions(text, ident, maps) {
-  const positions = [];
-  const r1 = SmartPatterns.substitute(text, ident);
-  positions.push(...r1.replacements);
-  const r2 = SubstitutionEngine.substitute(r1.text, maps);
-  positions.push(...r2.replacements);
-  return positions;
+// --- Reveal Diff (fake → real) ---
+function renderRevealDiff() {
+  const input = $('#revealInput').value;
+  const output = $('#revealOutput');
+  const stats = $('#revealStats');
+
+  if (!input) {
+    output.innerHTML = '';
+    stats.textContent = '';
+    return;
+  }
+
+  // Reverse: substitute → real using SmartPatterns reveal + explicit reveal
+  let result = input;
+  let totalCount = 0;
+
+  // Reverse explicit mappings (substitute → real)
+  const explicitRevealed = SubstitutionEngine.reveal(result, mappings);
+  // Count explicit reveals
+  for (const m of mappings) {
+    if (!m.enabled || !m.substitute) continue;
+    const regex = new RegExp(escapeRegex(m.substitute), m.caseSensitive ? 'g' : 'gi');
+    const matches = result.match(regex);
+    if (matches) totalCount += matches.length;
+  }
+  result = explicitRevealed;
+
+  // Reverse smart patterns (all identity substitutes → real)
+  const allSubs = gatherSmartSubstitutePairs(identity);
+  for (const pair of allSubs) {
+    const regex = new RegExp(escapeRegex(pair.substitute), 'gi');
+    const matches = result.match(regex);
+    if (matches) totalCount += matches.length;
+    result = result.replace(regex, pair.real);
+  }
+
+  if (result === input) {
+    output.textContent = input;
+    stats.textContent = 'No substituted values found to reveal';
+    return;
+  }
+
+  // Highlight revealed values
+  let html = escapeHtml(result);
+  for (const pair of [...allSubs, ...mappings.filter(m => m.enabled)]) {
+    const real = pair.real;
+    if (!real) continue;
+    const escapedReal = escapeHtml(real);
+    html = html.replace(
+      new RegExp(escapeRegex(escapedReal), 'gi'),
+      `<span class="sub-highlight" title="Was: ${escapeHtml(pair.substitute)}" style="background:#dbeafe;color:#1d4ed8">${escapedReal}</span>`
+    );
+  }
+  output.innerHTML = html;
+  stats.textContent = `${totalCount} value${totalCount !== 1 ? 's' : ''} revealed`;
+}
+
+// Gather all substitute → real pairs from identity for reveal
+function gatherSmartSubstitutePairs(id) {
+  const pairs = [];
+  for (const e of (id.emails || [])) {
+    if (e.substitute && e.real) pairs.push(e);
+  }
+  if (id.catchAllEmail) {
+    pairs.push({ substitute: id.catchAllEmail, real: '[catch-all]' });
+  }
+  for (const n of (id.names || [])) {
+    if (n.substitute && n.real) pairs.push(n);
+  }
+  for (const u of (id.usernames || [])) {
+    if (u.substitute && u.real) pairs.push(u);
+  }
+  for (const h of (id.hostnames || [])) {
+    if (h.substitute && h.real) pairs.push(h);
+  }
+  for (const p of (id.phones || [])) {
+    if (p.substitute && p.real) pairs.push(p);
+  }
+  return pairs;
+}
+
+async function copyRevealedText() {
+  const output = $('#revealOutput');
+  const text = output.textContent;
+  if (!text) return;
+
+  try {
+    await navigator.clipboard.writeText(text);
+    const btn = $('#btnCopyRevealed');
+    btn.textContent = 'Copied!';
+    btn.style.background = '#059669';
+    setTimeout(() => {
+      btn.textContent = 'Copy to Clipboard';
+      btn.style.background = '';
+    }, 1500);
+  } catch (e) {
+    // Fallback
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+  }
+}
+
+// --- Identity Status ---
+function updateIdentityStatus() {
+  const el = $('#identityStatus');
+  const missing = [];
+
+  if (!(identity.names || []).some(n => n.type === 'first')) missing.push('first name');
+  if (!(identity.names || []).some(n => n.type === 'last')) missing.push('last name');
+  if ((identity.emails || []).length === 0 && !identity.catchAllEmail) missing.push('email');
+  if ((identity.usernames || []).length === 0) missing.push('username');
+
+  if (missing.length > 0) {
+    el.textContent = `Identity missing: ${missing.join(', ')}. Go to the Identity tab to set up.`;
+    el.classList.add('visible');
+  } else {
+    el.classList.remove('visible');
+  }
+}
+
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 // --- Status Dot ---

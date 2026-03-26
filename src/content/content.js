@@ -95,7 +95,9 @@
   ]);
 
   function smartSubstitute(text, id) {
-    if (!id || !id.enabled) return { text, replacements: [] };
+    if (!id) return { text, replacements: [] };
+    // Default enabled to all-true if not set
+    if (!id.enabled) id.enabled = { emails: true, names: true, usernames: true, phones: true, paths: true };
     const replacements = [];
     let result = text;
 

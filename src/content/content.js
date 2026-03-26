@@ -1134,8 +1134,16 @@
         });
         await setStorageData('ss_mappings', currentMappings);
 
-        // Update local mappings
+        // Update local mappings so the fetch interceptor uses them immediately
         mappings = currentMappings;
+
+        // Replace the PPI value in the current input right now
+        if (inputEl) {
+          replaceInInput(inputEl, real, fake);
+          // Re-scan — will dismiss warning if no more PPI remains
+          if (inputScanTimer) clearTimeout(inputScanTimer);
+          inputScanTimer = setTimeout(() => scanInputForPPI(inputEl), 150);
+        }
 
         // Visual feedback
         btn.textContent = '\u2714';
@@ -1143,6 +1151,27 @@
         btn.disabled = true;
       });
     });
+  }
+
+  // Replace all occurrences of `real` with `fake` in an input or contenteditable element
+  function replaceInInput(el, real, fake) {
+    if (!el) return;
+    const re = new RegExp(real.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    if (el.value !== undefined) {
+      // <textarea> or <input>
+      el.value = el.value.replace(re, fake);
+    } else if (el.isContentEditable) {
+      // contenteditable div — walk text nodes to avoid breaking inner HTML
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) {
+        re.lastIndex = 0;
+        if (re.test(node.textContent)) {
+          re.lastIndex = 0;
+          node.textContent = node.textContent.replace(re, fake);
+        }
+      }
+    }
   }
 
   // Storage helpers for page world (uses postMessage to injector)

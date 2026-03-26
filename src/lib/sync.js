@@ -171,6 +171,61 @@ const SilentSendSync = {
       return [];
     }
   },
+
+  // ----------------------------------------------------------------
+  // File System Access API helpers — folder-based sync
+  // The directory handle is stored in IndexedDB so the user only
+  // needs to grant access once per browser session.
+  // ----------------------------------------------------------------
+
+  _dbPromise: null,
+
+  _openDB() {
+    if (this._dbPromise) return this._dbPromise;
+    this._dbPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open('ss_sync_handles', 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('handles');
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    return this._dbPromise;
+  },
+
+  async saveSyncDirHandle(handle) {
+    const db = await this._openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('handles', 'readwrite');
+      tx.objectStore('handles').put(handle, 'syncDir');
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  },
+
+  async loadSyncDirHandle() {
+    try {
+      const db = await this._openDB();
+      return new Promise((resolve) => {
+        const tx = db.transaction('handles', 'readonly');
+        const req = tx.objectStore('handles').get('syncDir');
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+      });
+    } catch {
+      return null;
+    }
+  },
+
+  async clearSyncDirHandle() {
+    try {
+      const db = await this._openDB();
+      return new Promise((resolve) => {
+        const tx = db.transaction('handles', 'readwrite');
+        tx.objectStore('handles').delete('syncDir');
+        tx.oncomplete = resolve;
+        tx.onerror = resolve;
+      });
+    } catch { /* ignore */ }
+  },
 };
 
 export default SilentSendSync;

@@ -272,6 +272,22 @@ src/
 - The extension only activates on supported AI sites (and any custom domains you add)
 - Your real identity data never leaves your machine
 
+## Disclaimer
+
+**Silent Send is not a battle-tested privacy application.** It is a convenience tool that reduces the chance of accidentally sharing personal information with AI services. It should not be relied upon as your sole privacy protection.
+
+**Estimated correctness: ~85-90%** for configured data. Things that can and will leak through:
+
+- **Images and screenshots** — Silent Send cannot scan pixels. If you paste a screenshot of a terminal with your real username in it, that goes through unchanged.
+- **File uploads** — PDFs, documents, and other file attachments are not scanned.
+- **Base64 and encoded data** — Data embedded in encoded formats is not detected.
+- **Names inside other words** — If your name is "Art", Silent Send may not catch "article" (it uses word boundaries, but edge cases exist).
+- **Unconfigured data** — It can only substitute what you told it about, plus known secret formats. Your home address, employer name, or project names won't be caught unless you add them as mappings.
+- **Short names** — Names under 3 characters are skipped for usernames/hostnames to avoid false positives.
+- **Non-standard secret formats** — The secret scanner knows common API key prefixes (sk-, ghp_, AKIA, etc.) but won't catch custom or proprietary token formats.
+
+**You should still review sensitive messages before sending.** Silent Send is a safety net, not a guarantee. Think of it like a spell checker for privacy — it catches most things, but you wouldn't send a legal document without proofreading.
+
 ## License
 
 [MIT](LICENSE) — use it for anything, commercial or personal, modify it, redistribute it, relicense it. Just keep the copyright notice in copies of the code.

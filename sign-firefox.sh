@@ -1,6 +1,7 @@
 #!/bin/bash
 #
 # Sign the Firefox extension using Mozilla's API.
+# Auto-bumps the patch version to avoid "version already exists" conflicts.
 # Reads credentials from .env file.
 #
 
@@ -8,6 +9,9 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE="$SCRIPT_DIR/.env"
+MANIFEST="$SCRIPT_DIR/manifest.firefox.json"
+MANIFEST_CHROME="$SCRIPT_DIR/manifest.json"
+PACKAGE_JSON="$SCRIPT_DIR/package.json"
 
 if [ ! -f "$ENV_FILE" ]; then
   echo "Error: .env file not found."
@@ -16,28 +20,41 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
-# Parse .env — handle quotes, spaces, comments
+# --- Auto-bump patch version ---
+CURRENT_VERSION=$(grep -o '"version": "[^"]*"' "$MANIFEST" | head -1 | grep -o '[0-9.]*')
+IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+PATCH=$((PATCH + 1))
+NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+
+echo "Version: $CURRENT_VERSION → $NEW_VERSION"
+
+# Update all version references
+sed -i "s/\"version\": \"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/" "$MANIFEST"
+sed -i "s/\"version\": \"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/" "$MANIFEST_CHROME"
+sed -i "s/\"version\": \"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/" "$PACKAGE_JSON"
+
+# Commit the version bump
+cd "$SCRIPT_DIR"
+git add manifest.json manifest.firefox.json package.json 2>/dev/null
+git commit -m "chore: auto-bump version to $NEW_VERSION for Firefox signing" --allow-empty 2>/dev/null || true
+
+# --- Parse .env ---
 API_KEY=""
 API_SECRET=""
 
 while IFS= read -r line || [ -n "$line" ]; do
-  # Skip comments and empty lines
   [[ "$line" =~ ^[[:space:]]*# ]] && continue
   [[ -z "$line" ]] && continue
 
-  # Split on first =
   key="${line%%=*}"
   value="${line#*=}"
 
-  # Trim whitespace from key
   key="$(echo "$key" | tr -d '[:space:]')"
 
-  # Strip surrounding quotes from value
   value="${value#\"}"
   value="${value%\"}"
   value="${value#\'}"
   value="${value%\'}"
-  # Trim whitespace
   value="$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 
   case "$key" in
@@ -63,15 +80,14 @@ if [ -z "$API_SECRET" ]; then
 fi
 
 echo "API Key: ${API_KEY:0:10}..."
-echo "API Secret: ${API_SECRET:0:5}..."
 echo ""
 
 # Build
 echo "Building Firefox extension..."
 "$SCRIPT_DIR/build.sh" firefox
 
-# Sign — disable config discovery to avoid conflicts
-echo "Signing with Mozilla..."
+# Sign
+echo "Signing v$NEW_VERSION with Mozilla..."
 npx web-ext sign \
   --no-config-discovery \
   --source-dir "$SCRIPT_DIR/dist/firefox" \
@@ -81,5 +97,6 @@ npx web-ext sign \
   --api-secret "$API_SECRET"
 
 echo ""
-echo "Done! Install the .xpi file from dist/firefox-signed/"
+echo "Done! v$NEW_VERSION signed."
+echo "Install the .xpi file from dist/firefox-signed/"
 echo "Drag it into Firefox or use File → Open File."

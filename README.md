@@ -86,6 +86,19 @@ You can create multiple profiles (Personal, Work, Spouse) using the dropdown at 
 | **Blue** | Reveal mode on — showing your real data in AI responses |
 | **Red** | Manually disabled |
 
+### Reveal mode
+
+When reveal mode is on (eye icon or `Alt+Shift+R`), the AI's responses are displayed with your **real data** instead of the fake substitutes. This is purely a local display change — **the AI never received your real data**. It only ever saw the fake names, emails, paths, etc.
+
+This exists so you can easily copy paths, commands, and code from the AI's response and paste them directly into your terminal or editor without manually translating fake values back to real ones.
+
+For example:
+- AI responds: `Edit the file at /home/ademo/project/config.yaml`
+- With reveal mode ON, you see: `Edit the file at /home/jsmith/project/config.yaml`
+- Copy that path, paste into terminal — it works
+
+Toggle it off and the display reverts to the fake data the AI actually received.
+
 ### Keyboard shortcuts
 
 | Shortcut | Action |
@@ -256,3 +269,7 @@ src/
 - No external servers, no telemetry, no analytics
 - The extension only activates on supported AI sites (and any custom domains you add)
 - Your real identity data never leaves your machine
+
+## License
+
+[MIT](LICENSE) — use it for anything, commercial or personal, modify it, redistribute it, relicense it. Just keep the copyright notice in copies of the code.

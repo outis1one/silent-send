@@ -2,6 +2,7 @@
   "name": "silent-send",
   "version": "0.3.0",
   "private": true,
+  "license": "MIT",
   "description": "Browser extension that substitutes personal data before sending to AI services",
   "scripts": {
     "build:chrome": "./build.sh chrome",

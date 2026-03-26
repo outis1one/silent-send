@@ -6,7 +6,12 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "silent-send@example.com",
-      "strict_min_version": "128.0"
+      "strict_min_version": "128.0",
+      "data_collection_permissions": {
+        "required": false,
+        "optional": false,
+        "description": "Silent Send does not collect, transmit, or store any data externally. All processing is 100% local in your browser."
+      }
     }
   },
   "permissions": [

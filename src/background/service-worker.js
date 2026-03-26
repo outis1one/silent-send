@@ -159,6 +159,14 @@ const messageHandlers = {
     api.action.setBadgeBackgroundColor({ color: '#6b7280' });
   },
 
+  async 'autosync:config-changed'() {
+    await setupAutoSyncAlarm();
+  },
+
+  async 'org:config-changed'() {
+    await setupOrgPolicyAlarm();
+  },
+
   async 'get:locked-state'(_message, _sender, sendResponse) {
     const locked = await Storage.isLocked();
     sendResponse({ locked });

@@ -322,6 +322,15 @@ All sync channels (browser sync, GitHub Gist, folder sync, custom URL, sync code
 3. Full configuration (including TOTP secret) is restored from the encrypted payload
 4. WebAuthn credential is registered locally for future re-verification
 
+### Managed browser deployments
+
+For organizations that want to prevent extension removal:
+
+- **Chrome / Chromium / Edge:** Use the `ExtensionInstallForcelist` group policy. See [Chrome Enterprise policies](https://chromeenterprise.google/policies/#ExtensionInstallForcelist).
+- **Firefox:** Use the `ExtensionSettings` policy in `policies.json` or via Group Policy. See [Firefox Enterprise policies](https://mozilla.github.io/policy-templates/#extensionsettings).
+
+These are standard browser management features — Silent Send does not attempt to prevent its own removal.
+
 ### Smart reveal
 
 Reveal mode only replaces values that were **actually substituted** in outbound messages during the current session. If the AI uses a word that happens to match one of your substitute values (e.g., the AI says "the user should..." and "user" is a configured substitute), it won't be falsely revealed as your real username.

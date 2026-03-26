@@ -1,7 +1,9 @@
 #!/bin/bash
 #
 # Sign the Firefox extension using Mozilla's API.
-# Auto-bumps the patch version to avoid "version already exists" conflicts.
+# Tries the current version first. Only bumps if that version
+# already exists at Mozilla. Handles rate limiting with backoff.
+#
 # Reads credentials from .env file.
 #
 
@@ -20,25 +22,12 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
-# --- Auto-bump version — always unique, no metadata ---
-# Reads current version, increments patch. If already signed,
-# keeps incrementing until it works.
+# --- Read current version (don't bump yet — try current first) ---
 CURRENT_VERSION=$(grep -o '"version": "[^"]*"' "$MANIFEST" | head -1 | grep -o '[0-9.]*')
 IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-PATCH=$((PATCH + 1))
-NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+NEW_VERSION="$CURRENT_VERSION"
 
-echo "Version: $CURRENT_VERSION → $NEW_VERSION"
-
-# Update all version references (only top-level "version", not "manifest_version")
-sed -i "s/^  \"version\": \"$CURRENT_VERSION\"/  \"version\": \"$NEW_VERSION\"/" "$MANIFEST"
-sed -i "s/^  \"version\": \"$CURRENT_VERSION\"/  \"version\": \"$NEW_VERSION\"/" "$MANIFEST_CHROME"
-sed -i "s/^  \"version\": \"$CURRENT_VERSION\"/  \"version\": \"$NEW_VERSION\"/" "$PACKAGE_JSON"
-
-# Commit the version bump
-cd "$SCRIPT_DIR"
-git add manifest.json manifest.firefox.json package.json 2>/dev/null
-git commit -m "chore: auto-bump version to $NEW_VERSION for Firefox signing" --allow-empty 2>/dev/null || true
+echo "Current version: $CURRENT_VERSION"
 
 # --- Parse .env ---
 API_KEY=""
@@ -88,38 +77,73 @@ echo ""
 echo "Building Firefox extension..."
 "$SCRIPT_DIR/build.sh" firefox
 
-# Sign — retry with incremented patch if version conflict
-MAX_ATTEMPTS=10
-for attempt in $(seq 1 $MAX_ATTEMPTS); do
-  echo "Signing v$NEW_VERSION with Mozilla (attempt $attempt)..."
+# --- Sign with retry ---
+MAX_ATTEMPTS=5
+WAIT_TIME=10
 
-  if npx web-ext sign \
+for attempt in $(seq 1 $MAX_ATTEMPTS); do
+  echo ""
+  echo "=== Attempt $attempt: signing v$NEW_VERSION ==="
+
+  # Capture output to check for specific errors
+  OUTPUT=$(npx web-ext sign \
     --no-config-discovery \
     --source-dir "$SCRIPT_DIR/dist/firefox" \
     --artifacts-dir "$SCRIPT_DIR/dist/firefox-signed" \
     --channel unlisted \
     --api-key "$API_KEY" \
-    --api-secret "$API_SECRET" 2>&1; then
-
+    --api-secret "$API_SECRET" 2>&1) && {
+    echo "$OUTPUT"
     echo ""
-    echo "Done! v$NEW_VERSION signed."
-    echo "Install the .xpi file from dist/firefox-signed/"
-    echo "Drag it into Firefox or use File → Open File."
+    echo "Success! v$NEW_VERSION signed."
+    echo "Install: dist/firefox-signed/"
+
+    # Update source files to match the signed version
+    sed -i "s/^  \"version\": \"[^\"]*\"/  \"version\": \"$NEW_VERSION\"/" "$MANIFEST"
+    sed -i "s/^  \"version\": \"[^\"]*\"/  \"version\": \"$NEW_VERSION\"/" "$MANIFEST_CHROME"
+    sed -i "s/^  \"version\": \"[^\"]*\"/  \"version\": \"$NEW_VERSION\"/" "$PACKAGE_JSON"
+
+    cd "$SCRIPT_DIR"
+    git add manifest.json manifest.firefox.json package.json 2>/dev/null
+    git commit -m "chore: release v$NEW_VERSION (Firefox signed)" --allow-empty 2>/dev/null || true
+
     exit 0
+  }
+
+  echo "$OUTPUT"
+
+  # Check if rate limited
+  if echo "$OUTPUT" | grep -q "throttled"; then
+    # Extract wait time from error message
+    THROTTLE_SECS=$(echo "$OUTPUT" | grep -oP 'available in \K\d+' || echo "60")
+    echo ""
+    echo "Rate limited by Mozilla. Waiting ${THROTTLE_SECS}s..."
+    sleep "$THROTTLE_SECS"
+    # Don't bump version — retry the same version after cooldown
+    continue
   fi
 
-  # If it failed due to version conflict, bump and rebuild
-  echo "Version $NEW_VERSION already exists, trying next..."
-  PATCH=$((PATCH + 1))
-  NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+  # Check if version already exists
+  if echo "$OUTPUT" | grep -qi "already exists\|version.*conflict\|could not be uploaded"; then
+    PATCH=$((PATCH + 1))
+    NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+    echo ""
+    echo "Version conflict. Bumping to $NEW_VERSION..."
 
-  # Only replace the top-level "version" field, not "manifest_version"
-  sed -i "s/^  \"version\": \"[^\"]*\"/  \"version\": \"$NEW_VERSION\"/" "$SCRIPT_DIR/dist/firefox/manifest.json"
+    # Update only the built manifest (not source — we'll update source on success)
+    sed -i "s/^  \"version\": \"[^\"]*\"/  \"version\": \"$NEW_VERSION\"/" "$SCRIPT_DIR/dist/firefox/manifest.json"
 
-  # Wait before retrying to avoid Mozilla rate limiting
-  echo "Waiting 8 seconds before retry..."
-  sleep 8
+    sleep "$WAIT_TIME"
+    continue
+  fi
+
+  # Unknown error — wait and retry
+  echo ""
+  echo "Unknown error. Waiting ${WAIT_TIME}s before retry..."
+  sleep "$WAIT_TIME"
 done
 
+echo ""
 echo "Error: Failed after $MAX_ATTEMPTS attempts."
+echo "If rate limited, wait a few minutes and try again."
 exit 1

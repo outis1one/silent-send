@@ -327,7 +327,7 @@
       hint: 'GPS coordinates — pinpoints a location', cat: 'address' },
     // Personal
     { name: 'Date (possible DOB)', re: /\b(?:(?:0[1-9]|1[0-2])[-/](?:0[1-9]|[12]\d|3[01])[-/](?:19|20)\d{2}|(?:19|20)\d{2}[-/](?:0[1-9]|1[0-2])[-/](?:0[1-9]|[12]\d|3[01]))\b/g,
-      hint: 'Date — could be a birthday', cat: 'personal' },
+      hint: 'Date — could be a birthday', cat: 'personal', contextRequired: true },
     { name: 'EIN / Tax ID', re: /\b\d{2}-\d{7}\b/g,
       hint: 'Could be a tax ID', cat: 'document' },
     // Paths not caught by smart patterns
@@ -344,8 +344,11 @@
       hint: 'Env variable with personal data', cat: 'env' },
   ];
 
+  const CONTEXT_WORDS_RE = /\b(?:born|birthday|dob|birth|passport|license|driver|ssn|social\s*security|address|zip|postal|date\s+of\s+birth)\b/i;
+
   function autoDetectPPI(text, ident) {
     if (!text || text.length < 5) return [];
+    const hasContext = CONTEXT_WORDS_RE.test(text);
 
     // Build skip set from configured values
     const configured = new Set();
@@ -360,6 +363,7 @@
 
     const findings = [];
     for (const pat of PPI_PATTERNS) {
+      if (pat.contextRequired && !hasContext) continue;
       pat.re.lastIndex = 0;
       let m;
       while ((m = pat.re.exec(text)) !== null) {
@@ -796,7 +800,7 @@
       acceptNode(node) {
         const parent = node.parentElement;
         if (parent && SKIP_REVEAL_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
-        if (parent?.classList?.contains('ss-reveal-badge')) return NodeFilter.FILTER_REJECT;
+        if (parent?.closest?.('.ss-autodetect-warning, .ss-presend-warning, .ss-reveal-badge')) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }
     });
@@ -846,7 +850,7 @@
       acceptNode(node) {
         const parent = node.parentElement;
         if (parent && SKIP_REVEAL_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
-        if (parent?.classList?.contains('ss-reveal-badge')) return NodeFilter.FILTER_REJECT;
+        if (parent?.closest?.('.ss-autodetect-warning, .ss-presend-warning, .ss-reveal-badge')) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }
     });
@@ -857,9 +861,13 @@
       if (!text || text.length < MIN_STRING_LENGTH) continue;
 
       for (const p of pairs) {
-        const escaped = esc(settings.revealMode ? p.to : p.from);
         const searchTerm = settings.revealMode ? p.to : p.from;
-        const regex = new RegExp(escaped, p.caseSensitive ? 'g' : 'gi');
+        const escaped = esc(searchTerm);
+        // Add word boundaries when the term starts/ends with word chars to
+        // prevent partial-word matches (e.g. "aud" inside "Claude")
+        const bStart = /^\w/.test(searchTerm) ? '\\b' : '';
+        const bEnd = /\w$/.test(searchTerm) ? '\\b' : '';
+        const regex = new RegExp(bStart + escaped + bEnd, p.caseSensitive ? 'g' : 'gi');
         let match;
 
         while ((match = regex.exec(text)) !== null) {

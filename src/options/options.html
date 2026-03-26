@@ -97,12 +97,58 @@
     </section>
 
     <section class="section">
+      <h2>Sync Between Browsers</h2>
+      <p class="section-desc">Keep your identities, mappings, and settings in sync across browsers.</p>
+
+      <div class="setting-row">
+        <div>
+          <label>Browser account sync</label>
+          <p class="setting-desc">Automatically sync via your browser account (Firefox Sync / Chrome account). Works across devices using the same browser.</p>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="browserSync">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div style="margin-top:16px">
+        <h3 style="font-size:13px;font-weight:600;margin:0 0 4px">Sync Code — cross-browser copy-paste</h3>
+        <p class="section-desc" style="margin-bottom:8px">Generate a code in one browser, paste it in another. Newest data wins automatically.</p>
+        <div class="bulk-actions">
+          <button class="btn btn-primary" id="btnGenerateSyncCode">Generate Sync Code</button>
+          <button class="btn" id="btnImportSyncCode">Import from Code</button>
+        </div>
+
+        <div id="syncCodeDisplay" style="display:none;margin-top:10px">
+          <textarea id="syncCodeText" rows="3" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:11px;resize:vertical;padding:6px;border:1px solid #d1d5db;border-radius:6px" readonly></textarea>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+            <button class="btn btn-primary" id="btnCopySyncCode">Copy to Clipboard</button>
+            <span id="syncCodeTime" style="font-size:11px;color:#6b7280"></span>
+          </div>
+        </div>
+
+        <div id="syncImportSection" style="display:none;margin-top:10px">
+          <textarea id="syncImportText" rows="3" placeholder="Paste sync code here…" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:11px;resize:vertical;padding:6px;border:1px solid #d1d5db;border-radius:6px"></textarea>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">
+            <button class="btn btn-primary" id="btnApplySyncCode">Apply</button>
+            <button class="btn" id="btnCancelSyncImport">Cancel</button>
+            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer">
+              <input type="checkbox" id="syncForce"> Force (override if local is newer)
+            </label>
+          </div>
+        </div>
+
+        <div id="syncStatus" style="margin-top:8px;font-size:12px;min-height:16px"></div>
+      </div>
+    </section>
+
+    <section class="section">
       <h2>Transfer Data</h2>
-      <p class="section-desc">Export all your identities, mappings, and settings to move between browsers. Encrypted exports require a password to decrypt.</p>
+      <p class="section-desc">Export all your identities, mappings, and settings to a file. Encrypted exports require a password to decrypt.</p>
       <div class="bulk-actions">
         <button class="btn" id="btnExportAll">Export All (plain)</button>
         <button class="btn" id="btnExportEncrypted">Export Encrypted</button>
-        <button class="btn" id="btnImportAll">Import</button>
+        <button class="btn" id="btnImportAll">Import from File</button>
         <input type="file" id="fileImportAll" accept=".json,.ssbackup" hidden>
       </div>
     </section>

@@ -7,6 +7,7 @@
  */
 
 import Storage from '../lib/storage.js';
+import SilentSendSync from '../lib/sync.js';
 import api from '../lib/browser-polyfill.js';
 
 // Track substitution counts per tab
@@ -296,11 +297,24 @@ async function updateIcon(settings) {
   }
 }
 
-// Update icon when settings, identity, or mappings change
-api.storage.onChanged.addListener(async (changes) => {
+// Update icon when settings, identity, or mappings change; push to sync storage if enabled
+api.storage.onChanged.addListener(async (changes, areaName) => {
   if (changes.ss_settings || changes.ss_identity || changes.ss_mappings) {
     const settings = await Storage.getSettings();
     await updateIcon(settings);
+
+    // Push to browser.storage.sync when local data changes (same-browser cross-device)
+    if (areaName === 'local' && settings.browserSync) {
+      await SilentSendSync.pushToSyncStorage();
+    }
+  }
+
+  // When sync storage changes (another device pushed new data), pull it into local
+  if (areaName === 'sync' && (changes.ss_sync_meta || Object.keys(changes).some(k => k.startsWith('ss_sync_chunk_')))) {
+    const settings = await Storage.getSettings();
+    if (settings.browserSync) {
+      await SilentSendSync.pullFromSyncStorage();
+    }
   }
 });
 
@@ -311,8 +325,11 @@ api.runtime.onInstalled.addListener(async () => {
   await updateIcon(settings);
 });
 
-// Also set icon on startup (service worker wake)
+// Also set icon on startup (service worker wake) + pull any newer sync data
 (async () => {
   const settings = await Storage.getSettings();
   await updateIcon(settings);
+  if (settings.browserSync) {
+    await SilentSendSync.pullFromSyncStorage();
+  }
 })();

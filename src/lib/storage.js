@@ -25,6 +25,7 @@ const DEFAULT_SETTINGS = {
   maxLogEntries: 200,
   customDomains: [],
   categories: ['name', 'email', 'phone', 'address', 'ssn', 'dob', 'domain', 'general'],
+  browserSync: false,
 };
 
 const Storage = {
@@ -36,7 +37,7 @@ const Storage = {
   },
 
   async saveMappings(mappings) {
-    await api.storage.local.set({ [KEYS.MAPPINGS]: mappings });
+    await api.storage.local.set({ [KEYS.MAPPINGS]: mappings, ss_lastModified: Date.now() });
   },
 
   async addMapping(mapping) {
@@ -96,7 +97,7 @@ const Storage = {
   },
 
   async saveProfiles(profiles) {
-    await api.storage.local.set({ [KEYS.IDENTITY]: { profiles } });
+    await api.storage.local.set({ [KEYS.IDENTITY]: { profiles }, ss_lastModified: Date.now() });
   },
 
   async addProfile(name) {
@@ -210,6 +211,7 @@ const Storage = {
     const current = await this.getSettings();
     await api.storage.local.set({
       [KEYS.SETTINGS]: { ...current, ...settings },
+      ss_lastModified: Date.now(),
     });
   },
 };

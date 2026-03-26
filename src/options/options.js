@@ -1,5 +1,6 @@
 import Storage from '../lib/storage.js';
 import SilentSendCrypto from '../lib/crypto.js';
+import SilentSendSync from '../lib/sync.js';
 import api from '../lib/browser-polyfill.js';
 
 let mappings = [];
@@ -18,10 +19,81 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('#autoRedactDetected').checked = settings.autoRedactDetected !== false;
   $('#autoAddDetected').checked = settings.autoAddDetected !== false;
   $('#maxLogEntries').value = settings.maxLogEntries || 200;
+  $('#browserSync').checked = settings.browserSync === true;
 
   renderMappings();
   renderDomains();
   renderLog();
+
+  // --- Sync section ---
+  $('#browserSync').addEventListener('change', async (e) => {
+    await Storage.saveSettings({ browserSync: e.target.checked });
+    if (e.target.checked) {
+      await SilentSendSync.pushToSyncStorage();
+      setSyncStatus('Browser account sync enabled. Your settings will sync automatically.', 'ok');
+    } else {
+      setSyncStatus('Browser account sync disabled.', 'neutral');
+    }
+  });
+
+  $('#btnGenerateSyncCode').addEventListener('click', async () => {
+    const code = await SilentSendSync.exportSyncCode();
+    const data = await SilentSendSync._getAllData();
+    $('#syncCodeText').value = code;
+    $('#syncCodeDisplay').style.display = 'block';
+    $('#syncImportSection').style.display = 'none';
+    $('#syncCodeTime').textContent = 'Generated: ' + new Date(data.lastModified).toLocaleString();
+    setSyncStatus('', 'neutral');
+  });
+
+  $('#btnCopySyncCode').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText($('#syncCodeText').value);
+      $('#btnCopySyncCode').textContent = 'Copied!';
+      setTimeout(() => { $('#btnCopySyncCode').textContent = 'Copy to Clipboard'; }, 2000);
+    } catch {
+      $('#syncCodeText').select();
+      document.execCommand('copy');
+    }
+  });
+
+  $('#btnImportSyncCode').addEventListener('click', () => {
+    $('#syncImportSection').style.display = 'block';
+    $('#syncCodeDisplay').style.display = 'none';
+    $('#syncImportText').focus();
+    setSyncStatus('', 'neutral');
+  });
+
+  $('#btnApplySyncCode').addEventListener('click', async () => {
+    const code = $('#syncImportText').value.trim();
+    if (!code) return;
+    const force = $('#syncForce').checked;
+    const result = await SilentSendSync.importSyncCode(code, { force });
+    if (result.success) {
+      setSyncStatus(`Imported successfully (data from ${result.importTime}).`, 'ok');
+      $('#syncImportSection').style.display = 'none';
+      $('#syncImportText').value = '';
+      mappings = await Storage.getMappings();
+      settings = await Storage.getSettings();
+      $('#browserSync').checked = settings.browserSync === true;
+      renderMappings();
+      renderDomains();
+      renderLog();
+    } else if (result.skipped) {
+      setSyncStatus(
+        `Skipped: local data is newer (local: ${result.localTime} vs import: ${result.importTime}). Check "Force" to override.`,
+        'warn'
+      );
+    } else {
+      setSyncStatus(`Failed: ${result.reason}`, 'error');
+    }
+  });
+
+  $('#btnCancelSyncImport').addEventListener('click', () => {
+    $('#syncImportSection').style.display = 'none';
+    $('#syncImportText').value = '';
+    setSyncStatus('', 'neutral');
+  });
 
   // Transfer data
   $('#btnExportAll').addEventListener('click', exportAllPlain);
@@ -391,6 +463,13 @@ async function importAll(e) {
 
   // Reset file input
   e.target.value = '';
+}
+
+function setSyncStatus(msg, type) {
+  const el = $('#syncStatus');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = type === 'ok' ? '#10b981' : type === 'warn' ? '#f59e0b' : type === 'error' ? '#dc2626' : '#6b7280';
 }
 
 function escapeHtml(str) {

@@ -80,6 +80,19 @@
     </section>
 
     <section class="section">
+      <h2>Custom Domains</h2>
+      <p class="section-desc">Add domains for self-hosted AI services (like OpenWebUI). The extension will activate on these domains in addition to the built-in ones.</p>
+      <div class="domain-list" id="domainList"></div>
+      <div class="add-row">
+        <input type="text" id="newDomain" placeholder="https://ai.myserver.com" class="input" style="flex:2">
+        <button class="btn btn-primary" id="btnAddDomain">Add Domain</button>
+      </div>
+      <p class="section-desc" style="margin-top:8px;margin-bottom:0">
+        After adding a domain in Chrome, you also need to grant permission: <code>chrome://extensions/</code> → Silent Send → Details → Site access → add the domain.
+      </p>
+    </section>
+
+    <section class="section">
       <h2>Activity Log</h2>
       <div class="log-actions">
         <span id="logCount">0 entries</span>
@@ -89,7 +102,7 @@
     </section>
 
     <footer>
-      <p>Silent Send v0.1.0</p>
+      <p>Silent Send v0.2.0</p>
     </footer>
   </div>
 

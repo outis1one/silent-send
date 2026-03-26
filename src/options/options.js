@@ -14,7 +14,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('#maxLogEntries').value = settings.maxLogEntries || 200;
 
   renderMappings();
+  renderDomains();
   renderLog();
+
+  // Custom domains
+  $('#btnAddDomain').addEventListener('click', addDomain);
+  $('#newDomain').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') addDomain();
+  });
 
   // Settings listeners
   $('#showHighlights').addEventListener('change', async (e) => {
@@ -174,6 +181,61 @@ async function renderLog() {
     `;
     })
     .join('');
+}
+
+// --- Custom Domains ---
+async function addDomain() {
+  let domain = $('#newDomain').value.trim();
+  if (!domain) return;
+
+  // Normalize: ensure it has a protocol
+  if (!domain.startsWith('http://') && !domain.startsWith('https://')) {
+    domain = 'https://' + domain;
+  }
+  // Strip trailing slashes
+  domain = domain.replace(/\/+$/, '');
+
+  const domains = settings.customDomains || [];
+  if (domains.includes(domain)) {
+    alert('Domain already added.');
+    return;
+  }
+
+  domains.push(domain);
+  settings.customDomains = domains;
+  await Storage.saveSettings({ customDomains: domains });
+  renderDomains();
+  $('#newDomain').value = '';
+}
+
+function renderDomains() {
+  const list = $('#domainList');
+  const domains = settings.customDomains || [];
+
+  if (domains.length === 0) {
+    list.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:12px;font-size:13px">No custom domains. Built-in sites (Claude, ChatGPT, Grok, Gemini, localhost) are always active.</div>';
+    return;
+  }
+
+  list.innerHTML = domains
+    .map((d, i) => `
+      <div class="domain-item" style="display:flex;align-items:center;justify-content:space-between;padding:8px;background:#f9fafb;border-radius:6px;margin-bottom:4px">
+        <span style="font-size:13px;font-family:monospace">${escapeHtml(d)}</span>
+        <button class="btn btn-sm btn-danger btn-remove-domain" data-index="${i}">&times;</button>
+      </div>
+    `)
+    .join('');
+
+  list.querySelectorAll('.btn-remove-domain').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const idx = parseInt(btn.dataset.index, 10);
+      const domains = settings.customDomains || [];
+      domains.splice(idx, 1);
+      settings.customDomains = domains;
+      await Storage.saveSettings({ customDomains: domains });
+      renderDomains();
+    });
+  });
 }
 
 function escapeHtml(str) {

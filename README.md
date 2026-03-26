@@ -10,7 +10,7 @@ A browser extension (Chrome + Firefox) that intercepts personal information and 
 | ChatGPT | chatgpt.com, chat.openai.com | Untested |
 | Grok | grok.x.ai, x.com/i/grok | Untested |
 | Gemini | gemini.google.com | Untested |
-| OpenWebUI | localhost, 127.0.0.1 (self-hosted) | Untested |
+| OpenWebUI | localhost, 127.0.0.1, or custom domain | Untested |
 
 > **Note:** Only Claude has been tested so far. The other services have API interception patterns defined but may need adjustments. PRs welcome.
 
@@ -51,83 +51,123 @@ A browser extension (Chrome + Firefox) that intercepts personal information and 
 
 ### Prerequisites
 
-You need [Git](https://git-scm.com/downloads) and [Node.js](https://nodejs.org/) (v18+) installed.
+- [Git](https://git-scm.com/downloads)
+- [Node.js](https://nodejs.org/) v18 or newer (needed for Firefox signing only)
 
-Clone the repo:
+### Step 1: Get the code
+
+Open a terminal (Terminal on Mac, Command Prompt or PowerShell on Windows, any terminal on Linux) and run:
+
 ```bash
 git clone https://github.com/outis1one/silent-send.git
 cd silent-send
 ```
 
-### Chrome (Developer Mode)
+This downloads the extension code to a `silent-send` folder on your computer.
 
-1. Run `./build.sh chrome` (or just use the root directory directly)
-2. Open `chrome://extensions/` in your browser
-3. Enable **Developer mode** (toggle in the top right corner)
-4. Click **Load unpacked** → navigate to and select the `dist/chrome/` folder (or the repo root)
+### Chrome
+
+1. Open `chrome://extensions/` in Chrome
+2. Enable **Developer mode** (toggle in the top right corner)
+3. Click **Load unpacked**
+4. Navigate to the `silent-send` folder you cloned and select it
 5. Navigate to any supported AI site — the extension icon appears in your toolbar
 
-That's it for Chrome. No account, no store, no fees.
+That's it for Chrome. No build step, no account, no store, no fees.
 
 ### Firefox (signed, persistent)
 
-Firefox requires extensions to be cryptographically signed before it will install them permanently. Mozilla provides free self-hosted signing — no store listing, no review process, no fees.
+Firefox requires extensions to be cryptographically signed before it will permanently install them. Mozilla provides free signing — no store listing, no review process, no fees. You just need a free Firefox account.
 
 #### Step 1: Create a free Firefox account
 
-1. Go to https://accounts.firefox.com/ and create an account (or sign in if you have one)
+1. Go to https://accounts.firefox.com/ and sign up (or sign in if you have one already)
 2. This is the same account used for Firefox Sync — you may already have one
 
-#### Step 2: Get your Mozilla API credentials
+#### Step 2: Generate your signing keys
 
 1. Go to https://addons.mozilla.org/developers/addon/api/key/
-2. Sign in with your Firefox account from step 1
-3. On that page you'll see two values:
-   - **JWT issuer** — this is your API key, looks like `user:12345678:901`
-   - **JWT secret** — a long alphanumeric string, this is your API secret
-4. Keep this page open — you'll need both values in the next step
+2. Sign in with your Firefox account
+3. You'll see two values on that page:
+   - **JWT issuer** — looks like `user:12345678:901`
+   - **JWT secret** — a long string of random characters
+4. You need both of these. Copy them or keep the page open.
 
-#### Step 3: Configure your credentials
+#### Step 3: Install dependencies and save your signing keys
 
+In your terminal, inside the `silent-send` folder:
+
+**Mac / Linux:**
 ```bash
-# Install dependencies
 npm install
-
-# Copy the env template
 cp .env.example .env
 ```
 
-Now open `.env` in any text editor and paste in your values from step 2:
+**Windows (Command Prompt):**
+```cmd
+npm install
+copy .env.example .env
+```
+
+Now open the `.env` file in any text editor (Notepad, VS Code, etc.) and replace the placeholder values with the two values from step 2:
+
 ```
 WEB_EXT_API_KEY="user:12345678:901"
 WEB_EXT_API_SECRET="your-jwt-secret-here"
 ```
 
-Save the file.
+Save and close the file.
 
 #### Step 4: Build and sign
 
+**Mac / Linux:**
 ```bash
 source .env && npm run sign:firefox
 ```
 
-This builds the Firefox version and submits it to Mozilla for signing. It takes 10-30 seconds. When done, you'll see a signed `.xpi` file in `dist/firefox-signed/`.
+**Windows (Command Prompt):**
+```cmd
+set /p x= < nul & for /f "tokens=1,* delims==" %a in (.env) do @set %a=%~b
+npm run sign:firefox
+```
 
-#### Step 5: Install the signed extension
+**Windows (PowerShell):**
+```powershell
+Get-Content .env | ForEach-Object { if ($_ -match '^(.+?)=(.*)$') { [Environment]::SetEnvironmentVariable($matches[1], $matches[2].Trim('"')) } }
+npm run sign:firefox
+```
+
+This submits the extension to Mozilla for signing (takes 10-30 seconds). When done, you'll find a signed `.xpi` file in `dist/firefox-signed/`.
+
+#### Step 5: Install
 
 - Drag the `.xpi` file into any Firefox window, **or**
 - Firefox menu → File → Open File → select the `.xpi`
 - Click **Add** when prompted
 
-The signed `.xpi` is **permanent** — it survives browser restarts, updates, everything. No store listing, no review process, no fees. You only need to re-sign when you update to a new version.
+Done. The extension is **permanently installed** — survives restarts, updates, everything. You only need to re-sign if you update to a newer version of Silent Send.
 
-### Firefox (temporary, for development)
+### Firefox (temporary, no signing needed)
 
-If you just want to try it out without signing:
+If you just want to try it out quickly:
+
+**Mac / Linux:**
 ```bash
 npm install && npm run run:firefox
 ```
-This opens a fresh Firefox with the extension pre-loaded. Auto-reloads on file changes. Resets when Firefox closes — useful for testing, not for daily use.
+
+**Windows:**
+```cmd
+npm install && npm run run:firefox
+```
+
+This opens Firefox with the extension pre-loaded. Resets when Firefox closes — useful for testing.
+
+## Custom domains (OpenWebUI, etc.)
+
+If you run OpenWebUI or another AI service on a custom domain (not localhost), go to **Options** → **Custom Domains** and add your domain (e.g. `https://ai.myserver.com`). The extension will activate on those domains too.
+
+For Chrome, you'll need to also grant the extension permission to access the new domain via `chrome://extensions/` → Silent Send → Details → Site access.
 
 ## Architecture
 
@@ -145,7 +185,7 @@ src/
   popup/
     popup.html/css/js   — Quick access: identity, mappings, activity, test mode
   options/
-    options.html/css/js — Full mapping management, import/export, settings
+    options.html/css/js — Full mapping management, import/export, settings, custom domains
   lib/
     substitution-engine.js — Core explicit find/replace logic
     smart-patterns.js   — Auto-detection of emails, names, usernames, hostnames, phones, paths
@@ -157,5 +197,5 @@ src/
 
 - All data stays local in browser storage
 - No external servers, no telemetry, no analytics
-- The extension only activates on claude.ai
+- The extension only activates on supported AI sites (and any custom domains you add)
 - Your real identity data never leaves your machine

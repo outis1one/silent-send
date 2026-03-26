@@ -2,6 +2,7 @@
  * Silent Send - Background Service Worker
  *
  * Manages badge count, coordinates between popup and content scripts.
+ * Injects content scripts on custom domains dynamically.
  * Uses `api` alias for cross-browser compatibility (Chrome + Firefox).
  */
 
@@ -10,6 +11,18 @@ import api from '../lib/browser-polyfill.js';
 
 // Track substitution counts per tab
 const tabCounts = new Map();
+
+// Built-in URL patterns
+const BUILTIN_URL_PATTERNS = [
+  'https://claude.ai/*',
+  'https://chatgpt.com/*',
+  'https://chat.openai.com/*',
+  'https://grok.x.ai/*',
+  'https://x.com/i/grok*',
+  'https://gemini.google.com/*',
+  'http://localhost/*',
+  'http://127.0.0.1/*',
+];
 
 // --- Badge Management ---
 
@@ -22,10 +35,15 @@ function updateBadge(tabId) {
 }
 
 // Reset count when tab navigates
-api.tabs.onUpdated.addListener((tabId, changeInfo) => {
+api.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.status === 'loading') {
     tabCounts.set(tabId, 0);
     updateBadge(tabId);
+  }
+
+  // Inject content script on custom domains when page loads
+  if (changeInfo.status === 'complete' && tab.url) {
+    await injectOnCustomDomain(tabId, tab.url);
   }
 });
 
@@ -33,6 +51,47 @@ api.tabs.onUpdated.addListener((tabId, changeInfo) => {
 api.tabs.onRemoved.addListener((tabId) => {
   tabCounts.delete(tabId);
 });
+
+// --- Dynamic injection for custom domains ---
+
+async function injectOnCustomDomain(tabId, tabUrl) {
+  const settings = await Storage.getSettings();
+  const customDomains = settings.customDomains || [];
+  if (customDomains.length === 0) return;
+
+  const matches = customDomains.some((domain) => tabUrl.startsWith(domain));
+  if (!matches) return;
+
+  // Check if already injected (avoid double-injection)
+  try {
+    const results = await api.scripting.executeScript({
+      target: { tabId },
+      func: () => !!window.__silentSendInjected,
+    });
+    if (results?.[0]?.result) return;
+  } catch (e) {
+    // Permission denied — user hasn't granted access to this domain
+    return;
+  }
+
+  // Inject CSS
+  try {
+    await api.scripting.insertCSS({
+      target: { tabId },
+      files: ['src/content/content.css'],
+    });
+  } catch (e) { /* non-fatal */ }
+
+  // Inject content script
+  try {
+    await api.scripting.executeScript({
+      target: { tabId },
+      files: ['src/content/injector.js'],
+    });
+  } catch (e) {
+    console.warn('[Silent Send] Failed to inject on custom domain:', e);
+  }
+}
 
 // --- Message Handling ---
 
@@ -88,18 +147,16 @@ const messageHandlers = {
 
   async 'update:settings'(message) {
     await Storage.saveSettings(message.settings);
-    // Broadcast to content scripts on all supported sites
-    const SUPPORTED_URLS = [
-      'https://claude.ai/*',
-      'https://chatgpt.com/*',
-      'https://chat.openai.com/*',
-      'https://grok.x.ai/*',
-      'https://x.com/i/grok*',
-      'https://gemini.google.com/*',
-      'http://localhost/*',
-      'http://127.0.0.1/*',
-    ];
-    for (const urlPattern of SUPPORTED_URLS) {
+
+    // Build list of all URL patterns (built-in + custom)
+    const allPatterns = [...BUILTIN_URL_PATTERNS];
+    const customDomains = message.settings.customDomains || [];
+    for (const domain of customDomains) {
+      allPatterns.push(domain + '/*');
+    }
+
+    // Broadcast to content scripts
+    for (const urlPattern of allPatterns) {
       const tabs = await api.tabs.query({ url: urlPattern }).catch(() => []);
       for (const tab of tabs) {
         api.tabs.sendMessage(tab.id, {

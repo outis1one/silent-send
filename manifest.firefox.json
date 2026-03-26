@@ -63,19 +63,13 @@
     "48": "icons/icon48.svg",
     "128": "icons/icon128.svg"
   },
+  "optional_permissions": [
+    "<all_urls>"
+  ],
   "web_accessible_resources": [
     {
       "resources": ["src/content/content.js"],
-      "matches": [
-        "https://claude.ai/*",
-        "https://chatgpt.com/*",
-        "https://chat.openai.com/*",
-        "https://grok.x.ai/*",
-        "https://x.com/*",
-        "https://gemini.google.com/*",
-        "http://localhost/*",
-        "http://127.0.0.1/*"
-      ]
+      "matches": ["<all_urls>"]
     }
   ]
 }

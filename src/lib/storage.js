@@ -19,6 +19,7 @@ const DEFAULT_SETTINGS = {
   showHighlights: false,
   revealMode: false,
   maxLogEntries: 200,
+  customDomains: [],
   categories: ['name', 'email', 'phone', 'address', 'ssn', 'dob', 'general'],
 };
 

@@ -21,7 +21,7 @@ const DEFAULT_SETTINGS = {
   secretScanning: true,
   maxLogEntries: 200,
   customDomains: [],
-  categories: ['name', 'email', 'phone', 'address', 'ssn', 'dob', 'general'],
+  categories: ['name', 'email', 'phone', 'address', 'ssn', 'dob', 'domain', 'general'],
 };
 
 const Storage = {

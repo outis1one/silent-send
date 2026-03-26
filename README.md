@@ -141,15 +141,16 @@ Save and close the file.
 
 #### Step 4: Build and sign
 
-**Mac / Linux:**
+**All platforms (Mac, Linux, Windows with Git Bash):**
 ```bash
-source .env && npm run sign:firefox
+npm run sign:firefox
 ```
 
-**Windows (Command Prompt):**
+The sign script reads your `.env` file automatically — no need to `source` it.
+
+**Windows (Command Prompt — if not using Git Bash):**
 ```cmd
-set /p x= < nul & for /f "tokens=1,* delims==" %a in (.env) do @set %a=%~b
-npm run sign:firefox
+node -e "require('fs').readFileSync('.env','utf8').split('\n').forEach(l=>{const[k,v]=l.split('=');if(k&&v)process.env[k.trim()]=v.trim().replace(/^\"|\"$/g,'')})" && npm run sign:firefox
 ```
 
 **Windows (PowerShell):**

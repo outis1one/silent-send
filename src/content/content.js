@@ -505,57 +505,192 @@
   };
 
   // ============================================================
-  // Response Observer (reveal mode)
+  // Response Reveal — swaps fake data back to real in the page
   // ============================================================
+
+  // All response/output selectors across supported services
+  const RESPONSE_SELECTORS = [
+    // Claude
+    '[data-is-streaming]', '.font-claude-message',
+    // Claude artifacts / code
+    '.code-block__code', '.artifact-content', 'pre code', 'pre',
+    // ChatGPT
+    '[data-message-author-role="assistant"]', '.markdown',
+    // Grok
+    '[class*="message-bubble"]', '[class*="response"]',
+    // Gemini
+    '.model-response-text', '.response-content', 'message-content',
+    // Generic / OpenWebUI
+    '.prose', '[class*="Message"]', '[class*="assistant"]',
+    // Code and artifacts everywhere
+    'code', '.hljs', '.highlight',
+  ].join(', ');
+
+  // Build reverse mapping pairs from identity + explicit mappings
+  function buildRevealPairs() {
+    const pairs = [];
+
+    // Explicit mappings (substitute → real)
+    for (const m of mappings) {
+      if (!m.enabled || !m.substitute || !m.real) continue;
+      pairs.push({ from: m.substitute, to: m.real, caseSensitive: m.caseSensitive });
+    }
+
+    // Smart identity pairs (substitute → real)
+    if (identity) {
+      for (const e of (identity.emails || [])) {
+        if (e.substitute && e.real) pairs.push({ from: e.substitute, to: e.real });
+      }
+      if (identity.catchAllEmail) {
+        // Can't reverse a catch-all to a specific email, but we mark it
+        // so the user sees it was a substitution
+      }
+      for (const n of (identity.names || [])) {
+        if (n.substitute && n.real) pairs.push({ from: n.substitute, to: n.real });
+      }
+      for (const u of (identity.usernames || [])) {
+        if (u.substitute && u.real) pairs.push({ from: u.substitute, to: u.real });
+      }
+      for (const h of (identity.hostnames || [])) {
+        if (h.substitute && h.real) pairs.push({ from: h.substitute, to: h.real });
+      }
+      for (const p of (identity.phones || [])) {
+        if (p.substitute && p.real) pairs.push({ from: p.substitute, to: p.real });
+      }
+    }
+
+    // Sort longer matches first
+    pairs.sort((a, b) => b.from.length - a.from.length);
+    return pairs;
+  }
+
+  function revealText(text) {
+    const pairs = buildRevealPairs();
+    let result = text;
+    for (const p of pairs) {
+      const escaped = esc(p.from);
+      const regex = new RegExp(escaped, p.caseSensitive ? 'g' : 'gi');
+      result = result.replace(regex, p.to);
+    }
+    return result;
+  }
+
+  // Store originals so we can un-reveal when toggled off
+  const originalTexts = new WeakMap();
+
+  function revealInElement(el) {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let textNode;
+    while ((textNode = walker.nextNode())) {
+      const text = textNode.textContent;
+      if (!text || text.trim().length === 0) continue;
+
+      // Save original if not already saved
+      if (!originalTexts.has(textNode)) {
+        originalTexts.set(textNode, text);
+      }
+
+      const revealed = revealText(text);
+      if (revealed !== text) {
+        textNode.textContent = revealed;
+      }
+    }
+  }
+
+  function unrevealInElement(el) {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let textNode;
+    while ((textNode = walker.nextNode())) {
+      const original = originalTexts.get(textNode);
+      if (original && textNode.textContent !== original) {
+        textNode.textContent = original;
+      }
+    }
+  }
+
+  // Reveal ALL existing responses on the page
+  function revealAllResponses() {
+    const elements = document.querySelectorAll(RESPONSE_SELECTORS);
+    for (const el of elements) {
+      revealInElement(el);
+    }
+  }
+
+  // Un-reveal ALL responses (restore originals)
+  function unrevealAllResponses() {
+    const elements = document.querySelectorAll(RESPONSE_SELECTORS);
+    for (const el of elements) {
+      unrevealInElement(el);
+    }
+  }
+
+  // Watch for new content (streaming responses, new messages)
   function observeResponses() {
     const observer = new MutationObserver((mutations) => {
       if (!settings.revealMode || !hasSubstitutions()) return;
 
       for (const mutation of mutations) {
+        // Handle new nodes
         for (const node of mutation.addedNodes) {
           if (node.nodeType !== Node.ELEMENT_NODE) continue;
-
-          // Response container selectors for all supported services
-          const RESPONSE_SELECTORS = [
-            // Claude
-            '[data-is-streaming]', '.font-claude-message',
-            // ChatGPT
-            '[data-message-author-role="assistant"]', '.markdown',
-            // Grok
-            '[class*="message-bubble"]', '[class*="response"]',
-            // Gemini
-            '.model-response-text', '.response-content', 'message-content',
-            // Generic
-            '.prose', '[class*="Message"]', '[class*="assistant"]',
-          ].join(', ');
 
           const responseEls = node.querySelectorAll
             ? node.querySelectorAll(RESPONSE_SELECTORS)
             : [];
-
           for (const el of responseEls) revealInElement(el);
 
           if (node.matches?.(RESPONSE_SELECTORS)) {
             revealInElement(node);
           }
         }
+
+        // Handle text changes in existing nodes (streaming)
+        if (mutation.type === 'characterData' && settings.revealMode) {
+          const parentEl = mutation.target.parentElement;
+          if (parentEl?.closest?.(RESPONSE_SELECTORS)) {
+            const text = mutation.target.textContent;
+            const revealed = revealText(text);
+            if (revealed !== text) {
+              // Save original before overwriting
+              if (!originalTexts.has(mutation.target)) {
+                originalTexts.set(mutation.target, text);
+              }
+              mutation.target.textContent = revealed;
+            }
+          }
+        }
       }
     });
 
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
   }
 
-  function revealInElement(el) {
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-    let textNode;
-    while ((textNode = walker.nextNode())) {
-      const original = textNode.textContent;
-      const revealed = reveal(original, mappings);
-      if (revealed !== original) {
-        textNode.textContent = revealed;
-      }
+  // React to reveal mode toggle
+  let prevRevealMode = settings.revealMode;
+  function checkRevealToggle() {
+    if (settings.revealMode && !prevRevealMode) {
+      // Just turned ON — reveal everything existing
+      revealAllResponses();
+    } else if (!settings.revealMode && prevRevealMode) {
+      // Just turned OFF — restore originals
+      unrevealAllResponses();
     }
+    prevRevealMode = settings.revealMode;
   }
+
+  // Hook into config updates to detect reveal toggle
+  const origMessageHandler = window.addEventListener;
+  window.addEventListener('message', (event) => {
+    if (event.source !== window) return;
+    if (event.data?.type === 'ss:config-updated') {
+      // Settings were updated — check if reveal mode changed
+      setTimeout(checkRevealToggle, 50);
+    }
+  });
 
   // ============================================================
   // Shadow DOM Traversal
@@ -591,21 +726,59 @@
   }, true);
 
   // ============================================================
+  // Reveal Mode Badge
+  // ============================================================
+  let revealBadge = null;
+
+  function ensureRevealBadge() {
+    if (revealBadge) return revealBadge;
+    revealBadge = document.createElement('div');
+    revealBadge.className = 'ss-reveal-badge';
+    revealBadge.textContent = 'Reveal Mode — showing real data';
+    document.body.appendChild(revealBadge);
+    return revealBadge;
+  }
+
+  function updateRevealBadge() {
+    const badge = ensureRevealBadge();
+    badge.classList.toggle('visible', !!settings.revealMode);
+  }
+
+  // ============================================================
   // Boot
   // ============================================================
-  if (document.body) {
+  function boot() {
     observeResponses();
-  } else {
-    document.addEventListener('DOMContentLoaded', observeResponses);
+    traverseShadowRoots();
+    updateRevealBadge();
+
+    // If reveal mode was already on at page load, reveal everything
+    if (settings.revealMode && hasSubstitutions()) {
+      // Wait for page content to render
+      setTimeout(revealAllResponses, 1000);
+      setTimeout(revealAllResponses, 3000);
+    }
+
+    const smartCount = (identity.emails || []).length +
+      (identity.names || []).length +
+      (identity.usernames || []).length +
+      (identity.phones || []).length;
+
+    console.log(
+      `[Silent Send] Active on ${location.hostname} — ${mappings.length} explicit mapping(s), ${smartCount} smart pattern(s)`
+    );
   }
-  traverseShadowRoots();
 
-  const smartCount = (identity.emails || []).length +
-    (identity.names || []).length +
-    (identity.usernames || []).length +
-    (identity.phones || []).length;
+  if (document.body) {
+    boot();
+  } else {
+    document.addEventListener('DOMContentLoaded', boot);
+  }
 
-  console.log(
-    `[Silent Send] Active on ${location.hostname} — ${mappings.length} explicit mapping(s), ${smartCount} smart pattern(s)`
-  );
+  // Also update badge when settings change
+  const origCheckReveal = checkRevealToggle;
+  checkRevealToggle = function () {
+    origCheckReveal();
+    updateRevealBadge();
+  };
 })();

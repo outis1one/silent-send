@@ -526,6 +526,14 @@ body {
   text-align: center;
 }
 
+.privacy-note {
+  font-size: 10px;
+  color: #9ca3af;
+  line-height: 1.4;
+  margin-bottom: 6px;
+  padding: 0 4px;
+}
+
 .footer a {
   font-size: 11px;
   color: #6b7280;

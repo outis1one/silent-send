@@ -740,24 +740,32 @@
 
   // React to reveal mode toggle
   let prevRevealMode = settings.revealMode;
+  let revealInterval = null;
+
   function checkRevealToggle() {
     if (settings.revealMode && !prevRevealMode) {
       // Just turned ON — reveal everything existing
+      console.log('[Silent Send] Reveal mode ON');
       revealAllResponses();
+      // Keep re-revealing periodically to catch new/streamed content
+      revealInterval = setInterval(() => {
+        if (settings.revealMode) revealAllResponses();
+      }, 2000);
     } else if (!settings.revealMode && prevRevealMode) {
       // Just turned OFF — restore originals
+      console.log('[Silent Send] Reveal mode OFF');
+      if (revealInterval) { clearInterval(revealInterval); revealInterval = null; }
       unrevealAllResponses();
     }
     prevRevealMode = settings.revealMode;
   }
 
   // Hook into config updates to detect reveal toggle
-  const origMessageHandler = window.addEventListener;
   window.addEventListener('message', (event) => {
     if (event.source !== window) return;
     if (event.data?.type === 'ss:config-updated') {
       // Settings were updated — check if reveal mode changed
-      setTimeout(checkRevealToggle, 50);
+      setTimeout(checkRevealToggle, 100);
     }
   });
 

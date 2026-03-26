@@ -92,6 +92,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     await Storage.clearLog();
     renderLog();
   });
+
+  // Reset all data
+  $('#btnResetAll').addEventListener('click', async () => {
+    if (!confirm('This will delete ALL your identities, mappings, settings, and logs.\n\nAre you sure?')) return;
+    if (!confirm('Really? This cannot be undone.')) return;
+    await api.storage.local.clear();
+    mappings = [];
+    settings = {};
+    renderMappings();
+    renderDomains();
+    renderLog();
+    alert('All data cleared. Reload the extension to start fresh.');
+  });
 });
 
 async function addMapping() {

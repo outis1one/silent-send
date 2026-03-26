@@ -13,13 +13,26 @@
   padding: 0 1px;
 }
 
-/* Revealed text styling (when reveal mode shows real values in responses) */
+/* CSS Custom Highlight API styles — zero DOM changes */
+
+/* Yellow highlight: fake values the AI received (non-reveal mode) */
+::highlight(ss-substituted) {
+  background-color: rgba(250, 204, 21, 0.4);
+  color: inherit;
+}
+
+/* Terminal style: real data shown in reveal mode (dark bg, green text) */
+::highlight(ss-revealed) {
+  background-color: rgba(0, 0, 0, 0.85);
+  color: #4ade80;
+}
+
+/* Fallback for browsers without Highlight API */
 .ss-revealed {
-  background: rgba(59, 130, 246, 0.1);
-  border-bottom: 2px solid rgba(59, 130, 246, 0.6);
-  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.85);
+  color: #4ade80;
   padding: 0 2px;
-  cursor: help;
+  border-radius: 2px;
 }
 
 /* Floating reveal mode indicator */

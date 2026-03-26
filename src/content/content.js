@@ -566,27 +566,41 @@
   };
 
   // ============================================================
-  // Response Reveal — swaps fake data back to real in the page
+  // Highlighting — CSS Custom Highlight API (zero DOM changes)
+  //
+  // Two highlight modes:
+  //   ss-substituted (yellow) — fake values the AI received
+  //   ss-revealed (terminal: dark bg, green text) — your real data
+  //
+  // Falls back to simple text replacement for reveal if
+  // CSS.highlights is not supported.
   // ============================================================
 
-  // Build reverse mapping pairs from identity + explicit mappings
+  const hasHighlightAPI = typeof CSS !== 'undefined' && CSS.highlights;
+
+  // Register highlight groups
+  let hlSubstituted = null;  // yellow — marks fake values in responses
+  let hlRevealed = null;     // terminal — marks revealed real values
+
+  if (hasHighlightAPI) {
+    hlSubstituted = new Highlight();
+    hlRevealed = new Highlight();
+    CSS.highlights.set('ss-substituted', hlSubstituted);
+    CSS.highlights.set('ss-revealed', hlRevealed);
+  }
+
+  // Build pairs: substitute → real
   function buildRevealPairs() {
     const pairs = [];
 
-    // Explicit mappings (substitute → real)
     for (const m of mappings) {
       if (!m.enabled || !m.substitute || !m.real) continue;
       pairs.push({ from: m.substitute, to: m.real, caseSensitive: m.caseSensitive });
     }
 
-    // Smart identity pairs (substitute → real)
     if (identity) {
       for (const e of (identity.emails || [])) {
         if (e.substitute && e.real) pairs.push({ from: e.substitute, to: e.real });
-      }
-      if (identity.catchAllEmail) {
-        // Can't reverse a catch-all to a specific email, but we mark it
-        // so the user sees it was a substitution
       }
       for (const n of (identity.names || [])) {
         if (n.substitute && n.real) pairs.push({ from: n.substitute, to: n.real });
@@ -602,20 +616,25 @@
       }
     }
 
-    // Sort longer matches first
     pairs.sort((a, b) => b.from.length - a.from.length);
     return pairs;
   }
 
-  // Cache reveal pairs — rebuild when config changes
+  // Cache
   let _revealPairsCache = null;
   window.addEventListener('message', (event) => {
     if (event.data?.type === 'ss:config-updated') _revealPairsCache = null;
   });
 
-  function revealText(text) {
+  function getRevealPairs() {
     if (!_revealPairsCache) _revealPairsCache = buildRevealPairs();
-    const pairs = _revealPairsCache;
+    return _revealPairsCache;
+  }
+
+  // --- Text replacement for reveal (needed regardless of highlight API) ---
+
+  function revealText(text) {
+    const pairs = getRevealPairs();
     let result = text;
     for (const p of pairs) {
       const escaped = esc(p.from);
@@ -625,114 +644,40 @@
     return result;
   }
 
-  // Store originals so we can un-reveal when toggled off
   const originalTexts = new WeakMap();
 
   function revealInElement(el) {
     if (SKIP_REVEAL_TAGS.has(el.tagName)) return;
     if (el.classList?.contains('ss-reveal-badge')) return;
-    if (el.classList?.contains('ss-revealed')) return; // skip our own spans
 
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
         const parent = node.parentElement;
         if (parent && SKIP_REVEAL_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
         if (parent?.classList?.contains('ss-reveal-badge')) return NodeFilter.FILTER_REJECT;
-        if (parent?.classList?.contains('ss-revealed')) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }
     });
 
-    // Collect nodes first (modifying DOM during walk breaks the walker)
-    const nodes = [];
     let textNode;
     while ((textNode = walker.nextNode())) {
-      nodes.push(textNode);
-    }
-
-    if (!_revealPairsCache) _revealPairsCache = buildRevealPairs();
-    const pairs = _revealPairsCache;
-
-    for (const node of nodes) {
-      const text = node.textContent;
+      const text = textNode.textContent;
       if (!text || text.length < MIN_STRING_LENGTH) continue;
 
-      // Save original
-      if (!originalTexts.has(node)) {
-        originalTexts.set(node, text);
+      if (!originalTexts.has(textNode)) {
+        originalTexts.set(textNode, text);
       }
 
-      // Find all substituted values and their positions
-      const segments = [];
-      let remaining = text;
-      let offset = 0;
-
-      for (const p of pairs) {
-        const escaped = esc(p.from);
-        const regex = new RegExp(escaped, p.caseSensitive ? 'gi' : 'gi');
-        let match;
-        while ((match = regex.exec(text)) !== null) {
-          segments.push({
-            start: match.index,
-            end: match.index + match[0].length,
-            original: match[0],
-            revealed: p.to,
-          });
-        }
+      const revealed = revealText(text);
+      if (revealed !== text) {
+        textNode.textContent = revealed;
       }
-
-      if (segments.length === 0) continue;
-
-      // Sort by position, deduplicate overlaps
-      segments.sort((a, b) => a.start - b.start);
-      const deduped = [];
-      let lastEnd = -1;
-      for (const s of segments) {
-        if (s.start >= lastEnd) {
-          deduped.push(s);
-          lastEnd = s.end;
-        }
-      }
-
-      // Build fragment: text + highlighted spans
-      const frag = document.createDocumentFragment();
-      let pos = 0;
-
-      for (const s of deduped) {
-        // Text before this match
-        if (s.start > pos) {
-          frag.appendChild(document.createTextNode(text.slice(pos, s.start)));
-        }
-        // Highlighted revealed value
-        const span = document.createElement('span');
-        span.className = 'ss-revealed';
-        span.textContent = s.revealed;
-        span.title = 'Substituted value: ' + s.original;
-        frag.appendChild(span);
-        pos = s.end;
-      }
-
-      // Remaining text after last match
-      if (pos < text.length) {
-        frag.appendChild(document.createTextNode(text.slice(pos)));
-      }
-
-      // Replace the text node with the fragment
-      node.parentNode.replaceChild(frag, node);
     }
   }
 
   function unrevealInElement(el) {
     if (SKIP_REVEAL_TAGS.has(el.tagName)) return;
 
-    // Remove all ss-revealed spans, restoring original text
-    const spans = el.querySelectorAll('.ss-revealed');
-    for (const span of spans) {
-      const text = document.createTextNode(span.title?.replace('Substituted value: ', '') || span.textContent);
-      span.parentNode.replaceChild(text, span);
-    }
-
-    // Also restore any text nodes that were modified without spans
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     let textNode;
     while ((textNode = walker.nextNode())) {
@@ -741,9 +686,57 @@
         textNode.textContent = original;
       }
     }
+  }
 
-    // Normalize adjacent text nodes
-    el.normalize();
+  // --- CSS Highlight API — find and highlight matching text ---
+
+  function highlightMatches(root) {
+    if (!hasHighlightAPI) return;
+
+    // Clear previous ranges
+    hlSubstituted.clear();
+    hlRevealed.clear();
+
+    const pairs = getRevealPairs();
+    if (pairs.length === 0) return;
+
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const parent = node.parentElement;
+        if (parent && SKIP_REVEAL_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
+        if (parent?.classList?.contains('ss-reveal-badge')) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+
+    let textNode;
+    while ((textNode = walker.nextNode())) {
+      const text = textNode.textContent;
+      if (!text || text.length < MIN_STRING_LENGTH) continue;
+
+      for (const p of pairs) {
+        const escaped = esc(settings.revealMode ? p.to : p.from);
+        const searchTerm = settings.revealMode ? p.to : p.from;
+        const regex = new RegExp(escaped, p.caseSensitive ? 'g' : 'gi');
+        let match;
+
+        while ((match = regex.exec(text)) !== null) {
+          try {
+            const range = new Range();
+            range.setStart(textNode, match.index);
+            range.setEnd(textNode, match.index + match[0].length);
+
+            if (settings.revealMode) {
+              hlRevealed.add(range);
+            } else {
+              hlSubstituted.add(range);
+            }
+          } catch (e) {
+            // Range may be invalid if DOM changed
+          }
+        }
+      }
+    }
   }
 
   // Elements to skip when revealing (inputs, scripts, styles, extension UI)
@@ -751,59 +744,83 @@
     'SCRIPT', 'STYLE', 'NOSCRIPT', 'IFRAME', 'INPUT', 'TEXTAREA', 'SELECT',
   ]);
 
-  // Reveal ALL text on the page (not just specific selectors)
+  // Reveal ALL text on the page + apply highlights
   function revealAllResponses() {
     revealInElement(document.body);
+    highlightMatches(document.body);
   }
 
-  // Un-reveal ALL text on the page
+  // Un-reveal ALL text + clear highlights
   function unrevealAllResponses() {
     unrevealInElement(document.body);
+    // In non-reveal mode, highlight the fake values instead
+    highlightMatches(document.body);
+  }
+
+  // Debounced highlight refresh
+  let _highlightTimer = null;
+  function scheduleHighlightRefresh() {
+    if (!hasHighlightAPI) return;
+    if (_highlightTimer) clearTimeout(_highlightTimer);
+    _highlightTimer = setTimeout(() => {
+      highlightMatches(document.body);
+    }, 500);
   }
 
   // Watch for ANY new content on the page
   function observeResponses() {
     const observer = new MutationObserver((mutations) => {
-      if (!settings.revealMode || !hasSubstitutions()) return;
+      if (!hasSubstitutions()) return;
+
+      // Always schedule highlight refresh for new content (yellow markers)
+      let hasNewContent = false;
 
       for (const mutation of mutations) {
-        // Handle new nodes — reveal all text in them
         for (const node of mutation.addedNodes) {
-          if (node.nodeType === Node.ELEMENT_NODE) {
-            if (!SKIP_REVEAL_TAGS.has(node.tagName)) {
-              revealInElement(node);
-            }
-          } else if (node.nodeType === Node.TEXT_NODE) {
-            const text = node.textContent;
-            if (text && text.length >= MIN_STRING_LENGTH) {
-              if (!originalTexts.has(node)) {
-                originalTexts.set(node, text);
+          hasNewContent = true;
+          // Only do text replacement in reveal mode
+          if (settings.revealMode) {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+              if (!SKIP_REVEAL_TAGS.has(node.tagName)) {
+                revealInElement(node);
               }
-              const revealed = revealText(text);
-              if (revealed !== text) {
-                node.textContent = revealed;
+            } else if (node.nodeType === Node.TEXT_NODE) {
+              const text = node.textContent;
+              if (text && text.length >= MIN_STRING_LENGTH) {
+                if (!originalTexts.has(node)) {
+                  originalTexts.set(node, text);
+                }
+                const revealed = revealText(text);
+                if (revealed !== text) {
+                  node.textContent = revealed;
+                }
               }
             }
           }
         }
 
-        // Handle text changes in existing nodes (streaming responses)
-        if (mutation.type === 'characterData' && settings.revealMode) {
-          const text = mutation.target.textContent;
-          if (text && text.length >= MIN_STRING_LENGTH) {
-            const parent = mutation.target.parentElement;
-            if (parent && !SKIP_REVEAL_TAGS.has(parent.tagName)) {
-              if (!originalTexts.has(mutation.target)) {
-                originalTexts.set(mutation.target, text);
-              }
-              const revealed = revealText(text);
-              if (revealed !== text) {
-                mutation.target.textContent = revealed;
+        // Handle streaming text changes
+        if (mutation.type === 'characterData') {
+          hasNewContent = true;
+          if (settings.revealMode) {
+            const text = mutation.target.textContent;
+            if (text && text.length >= MIN_STRING_LENGTH) {
+              const parent = mutation.target.parentElement;
+              if (parent && !SKIP_REVEAL_TAGS.has(parent.tagName)) {
+                if (!originalTexts.has(mutation.target)) {
+                  originalTexts.set(mutation.target, text);
+                }
+                const revealed = revealText(text);
+                if (revealed !== text) {
+                  mutation.target.textContent = revealed;
+                }
               }
             }
           }
         }
       }
+
+      if (hasNewContent) scheduleHighlightRefresh();
     });
 
     observer.observe(document.body, {

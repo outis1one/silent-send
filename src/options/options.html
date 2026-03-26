@@ -398,6 +398,32 @@
         <button class="btn" id="btnImportAll">Import from File</button>
         <input type="file" id="fileImportAll" accept=".json,.ssbackup" hidden>
       </div>
+
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid #e5e7eb">
+        <h3 style="font-size:13px;font-weight:600;margin:0 0 4px">Bulk Import — populate from existing data</h3>
+        <p class="section-desc" style="margin-bottom:8px">
+          Import real values from a CSV, password manager export, or browser autofill export.
+          Passwords are <strong>never</strong> imported — only usernames, emails, names, and domains.
+          Imported values appear with blank substitutes so you can fill in fakes.
+        </p>
+        <div style="display:flex;gap:8px;margin-bottom:6px;flex-wrap:wrap;align-items:center">
+          <button class="btn btn-primary" id="btnBulkImport">Import CSV / Password Export</button>
+          <input type="file" id="fileBulkImport" accept=".csv,.tsv,.txt" hidden>
+          <span style="font-size:11px;color:#6b7280">Chrome passwords, Firefox logins, Bitwarden, 1Password, autofill, or plain CSV</span>
+        </div>
+
+        <div id="bulkImportPreview" style="display:none;margin-top:10px;padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px">
+          <h4 style="font-size:12px;font-weight:600;margin:0 0 8px">Import Preview</h4>
+          <div id="bulkImportSummary" style="font-size:12px;margin-bottom:8px"></div>
+          <div id="bulkImportItems" style="max-height:200px;overflow-y:auto;font-size:11px;margin-bottom:8px"></div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary btn-sm" id="btnApplyBulkImport">Apply Import</button>
+            <button class="btn btn-sm" id="btnCancelBulkImport">Cancel</button>
+          </div>
+        </div>
+
+        <div id="bulkImportStatus" style="font-size:12px;margin-top:6px;min-height:16px"></div>
+      </div>
     </section>
 
     <section class="section">

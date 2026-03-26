@@ -122,6 +122,80 @@ document.addEventListener('DOMContentLoaded', async () => {
     await checkFileSyncUpdate();
   });
 
+  // --- GitHub Gist sync ---
+  // Restore saved token (session only — never persisted to storage)
+  {
+    const stored = await api.storage.local.get('ss_gist_id');
+    if (stored.ss_gist_id) {
+      setGistSyncStatus(`Gist ID: ${stored.ss_gist_id.slice(0, 12)}…`, 'ok');
+    }
+  }
+
+  $('#btnGistPush').addEventListener('click', async () => {
+    const token = $('#gistToken').value.trim();
+    if (!token) { setGistSyncStatus('Enter your GitHub PAT first.', 'warn'); return; }
+    setGistSyncStatus('Pushing…', 'neutral');
+    const r = await SilentSendSync.pushToGist(token);
+    if (r.success) {
+      setGistSyncStatus(`Pushed. Gist ID: ${r.gistId.slice(0, 12)}…`, 'ok');
+    } else {
+      setGistSyncStatus('Push failed: ' + r.reason, 'error');
+    }
+  });
+
+  $('#btnGistPull').addEventListener('click', async () => {
+    const token = $('#gistToken').value.trim();
+    if (!token) { setGistSyncStatus('Enter your GitHub PAT first.', 'warn'); return; }
+    setGistSyncStatus('Pulling…', 'neutral');
+    const r = await SilentSendSync.pullFromGist(token);
+    if (!r.success) {
+      setGistSyncStatus('Pull failed: ' + r.reason, 'error');
+    } else if (r.imported) {
+      setGistSyncStatus(`Pulled (${r.time}). Refreshing…`, 'ok');
+      mappings = await Storage.getMappings();
+      settings = await Storage.getSettings();
+      renderMappings();
+      renderDomains();
+      renderLog();
+    } else {
+      setGistSyncStatus('Already up to date.', 'ok');
+    }
+  });
+
+  // --- Custom URL sync ---
+  $('#btnUrlPush').addEventListener('click', async () => {
+    const url = $('#customSyncUrl').value.trim();
+    if (!url) { setUrlSyncStatus('Enter a URL first.', 'warn'); return; }
+    const headers = parseHeadersField($('#customSyncHeaders').value);
+    setUrlSyncStatus('Pushing…', 'neutral');
+    const r = await SilentSendSync.pushToUrl({ url, headers });
+    if (r.success) {
+      setUrlSyncStatus('Pushed successfully.', 'ok');
+    } else {
+      setUrlSyncStatus('Push failed: ' + r.reason, 'error');
+    }
+  });
+
+  $('#btnUrlPull').addEventListener('click', async () => {
+    const url = $('#customSyncUrl').value.trim();
+    if (!url) { setUrlSyncStatus('Enter a URL first.', 'warn'); return; }
+    const headers = parseHeadersField($('#customSyncHeaders').value);
+    setUrlSyncStatus('Pulling…', 'neutral');
+    const r = await SilentSendSync.pullFromUrl({ url, headers });
+    if (!r.success) {
+      setUrlSyncStatus('Pull failed: ' + r.reason, 'error');
+    } else if (r.imported) {
+      setUrlSyncStatus(`Pulled (${r.time}). Refreshing…`, 'ok');
+      mappings = await Storage.getMappings();
+      settings = await Storage.getSettings();
+      renderMappings();
+      renderDomains();
+      renderLog();
+    } else {
+      setUrlSyncStatus('Already up to date.', 'ok');
+    }
+  });
+
   // Transfer data
   $('#btnExportAll').addEventListener('click', exportAllPlain);
   $('#btnExportEncrypted').addEventListener('click', exportAllEncrypted);
@@ -603,6 +677,29 @@ function setFileSyncStatus(msg, type) {
   if (!el) return;
   el.textContent = msg;
   el.style.color = type === 'ok' ? '#10b981' : type === 'warn' ? '#f59e0b' : type === 'error' ? '#dc2626' : '#6b7280';
+}
+
+function setGistSyncStatus(msg, type) {
+  const el = $('#gistSyncStatus');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = type === 'ok' ? '#10b981' : type === 'warn' ? '#f59e0b' : type === 'error' ? '#dc2626' : '#6b7280';
+}
+
+function setUrlSyncStatus(msg, type) {
+  const el = $('#urlSyncStatus');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = type === 'ok' ? '#10b981' : type === 'warn' ? '#f59e0b' : type === 'error' ? '#dc2626' : '#6b7280';
+}
+
+function parseHeadersField(val) {
+  if (!val || !val.trim()) return {};
+  try {
+    return JSON.parse(val.trim());
+  } catch {
+    return {};
+  }
 }
 
 function setSyncStatus(msg, type) {

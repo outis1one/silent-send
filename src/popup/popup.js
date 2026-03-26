@@ -6,7 +6,9 @@ import api from '../lib/browser-polyfill.js';
 
 // --- State ---
 let mappings = [];
-let identity = {};
+let identity = {};     // merged identity (all active profiles)
+let profiles = [];     // all profiles
+let currentProfileId = null;  // currently selected profile for editing
 let settings = {};
 
 // --- DOM refs ---
@@ -16,12 +18,21 @@ const $$ = (sel) => document.querySelectorAll(sel);
 // --- Init ---
 document.addEventListener('DOMContentLoaded', async () => {
   mappings = await Storage.getMappings();
+  profiles = await Storage.getProfiles();
   identity = await Storage.getIdentity();
   settings = await Storage.getSettings();
 
+  // Initialize profiles — create default if none exist
+  if (profiles.length === 0) {
+    const p = await Storage.addProfile('Personal');
+    profiles = [p];
+  }
+  currentProfileId = profiles[0].id;
+
+  renderProfileSelector();
+  loadIdentityForm();
   renderMappings();
   renderActivity();
-  loadIdentityForm();
   updateStatusDot();
   checkFirstRun();
 
@@ -37,10 +48,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       if (tab.dataset.tab === 'activity') renderActivity();
       if (tab.dataset.tab === 'test') {
-        // Reload identity from storage in case it was just saved
+        // Reload merged identity from storage in case profiles were just saved
         Storage.getIdentity().then((id) => {
           identity = id;
           updateIdentityStatus();
+        });
+      }
+      if (tab.dataset.tab === 'identity') {
+        // Reload profiles
+        Storage.getProfiles().then((p) => {
+          profiles = p;
+          renderProfileSelector();
+          loadIdentityForm();
         });
       }
     });
@@ -69,6 +88,57 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   $('#btnReveal').classList.toggle('active', settings.revealMode);
+
+  // Profile controls
+  $('#profileSelect').addEventListener('change', (e) => {
+    currentProfileId = e.target.value;
+    loadIdentityForm();
+  });
+
+  $('#btnAddProfile').addEventListener('click', async () => {
+    const name = prompt('Profile name:', `Profile ${profiles.length + 1}`);
+    if (!name) return;
+    const p = await Storage.addProfile(name);
+    profiles = await Storage.getProfiles();
+    currentProfileId = p.id;
+    renderProfileSelector();
+    loadIdentityForm();
+    checkFirstRun();
+  });
+
+  $('#btnRenameProfile').addEventListener('click', async () => {
+    const profile = profiles.find(p => p.id === currentProfileId);
+    if (!profile) return;
+    const name = prompt('Rename profile:', profile.name);
+    if (!name) return;
+    await Storage.updateProfile(currentProfileId, { name });
+    profiles = await Storage.getProfiles();
+    renderProfileSelector();
+  });
+
+  $('#btnDeleteProfile').addEventListener('click', async () => {
+    if (profiles.length <= 1) {
+      alert('Cannot delete the last profile.');
+      return;
+    }
+    const profile = profiles.find(p => p.id === currentProfileId);
+    if (!confirm(`Delete profile "${profile?.name}"?`)) return;
+    await Storage.deleteProfile(currentProfileId);
+    profiles = await Storage.getProfiles();
+    currentProfileId = profiles[0]?.id;
+    renderProfileSelector();
+    loadIdentityForm();
+    identity = await Storage.getIdentity();
+    checkFirstRun();
+  });
+
+  $('#profileActive').addEventListener('change', async (e) => {
+    await Storage.updateProfile(currentProfileId, { active: e.target.checked });
+    profiles = await Storage.getProfiles();
+    identity = await Storage.getIdentity();
+    renderProfileSelector();
+    checkFirstRun();
+  });
 
   // Save identity
   $('#btnSaveIdentity').addEventListener('click', saveIdentity);
@@ -108,40 +178,45 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 });
 
+// --- Profiles ---
+function renderProfileSelector() {
+  const select = $('#profileSelect');
+  select.innerHTML = profiles.map(p =>
+    `<option value="${p.id}" ${p.id === currentProfileId ? 'selected' : ''}>` +
+    `${escapeHtml(p.name)}${p.active ? '' : ' (off)'}` +
+    `</option>`
+  ).join('');
+
+  const profile = profiles.find(p => p.id === currentProfileId);
+  $('#profileActive').checked = profile?.active ?? true;
+}
+
 // --- Identity ---
 function loadIdentityForm() {
-  const first = (identity.names || []).find(n => n.type === 'first');
-  const last = (identity.names || []).find(n => n.type === 'last');
-  const email = (identity.emails || [])[0];
-  const user = (identity.usernames || [])[0];
-  const phone = (identity.phones || [])[0];
+  const profile = profiles.find(p => p.id === currentProfileId);
+  if (!profile) return;
 
-  if (first) {
-    $('#idFirstReal').value = first.real || '';
-    $('#idFirstSub').value = first.substitute || '';
-  }
-  if (last) {
-    $('#idLastReal').value = last.real || '';
-    $('#idLastSub').value = last.substitute || '';
-  }
-  if (email) {
-    $('#idEmailReal').value = email.real || '';
-    $('#idEmailSub').value = email.substitute || '';
-  }
-  $('#idCatchAllEmail').value = identity.catchAllEmail || '';
-  if (user) {
-    $('#idUserReal').value = user.real || '';
-    $('#idUserSub').value = user.substitute || '';
-  }
-  const host = (identity.hostnames || [])[0];
-  if (host) {
-    $('#idHostReal').value = host.real || '';
-    $('#idHostSub').value = host.substitute || '';
-  }
-  if (phone) {
-    $('#idPhoneReal').value = phone.real || '';
-    $('#idPhoneSub').value = phone.substitute || '';
-  }
+  const first = (profile.names || []).find(n => n.type === 'first');
+  const last = (profile.names || []).find(n => n.type === 'last');
+  const email = (profile.emails || [])[0];
+  const user = (profile.usernames || [])[0];
+  const host = (profile.hostnames || [])[0];
+  const phone = (profile.phones || [])[0];
+
+  $('#idFirstReal').value = first?.real || '';
+  $('#idFirstSub').value = first?.substitute || '';
+  $('#idLastReal').value = last?.real || '';
+  $('#idLastSub').value = last?.substitute || '';
+  $('#idEmailReal').value = email?.real || '';
+  $('#idEmailSub').value = email?.substitute || '';
+  $('#idCatchAllEmail').value = profile.catchAllEmail || '';
+  $('#idUserReal').value = user?.real || '';
+  $('#idUserSub').value = user?.substitute || '';
+  $('#idHostReal').value = host?.real || '';
+  $('#idHostSub').value = host?.substitute || '';
+  $('#idPhoneReal').value = phone?.real || '';
+  $('#idPhoneSub').value = phone?.substitute || '';
+  $('#profileActive').checked = profile.active ?? true;
 }
 
 async function saveIdentity() {
@@ -185,18 +260,20 @@ async function saveIdentity() {
     phones.push({ real: phoneReal, substitute: phoneSub });
   }
 
-  identity = {
+  const profileData = {
     names,
     emails,
     usernames,
     hostnames,
     phones,
     catchAllEmail: $('#idCatchAllEmail').value.trim(),
-    emailDomains: identity.emailDomains || [],
-    enabled: identity.enabled || { emails: true, names: true, usernames: true, phones: true, paths: true },
+    emailDomains: [],
+    enabled: { emails: true, names: true, usernames: true, phones: true, paths: true },
   };
 
-  await Storage.saveIdentity(identity);
+  await Storage.updateProfile(currentProfileId, profileData);
+  profiles = await Storage.getProfiles();
+  identity = await Storage.getIdentity();
   checkFirstRun();
 
   // Flash save button

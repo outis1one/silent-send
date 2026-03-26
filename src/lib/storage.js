@@ -67,14 +67,17 @@ const Storage = {
     await this.saveMappings(filtered);
   },
 
-  // --- Identity (Smart Patterns) ---
+  // --- Identity Profiles (Smart Patterns) ---
 
-  async getIdentity() {
-    const result = await api.storage.local.get(KEYS.IDENTITY);
-    return result[KEYS.IDENTITY] || {
+  _emptyProfile() {
+    return {
+      id: crypto.randomUUID(),
+      name: 'Personal',
+      active: true,
       emails: [],
       names: [],
       usernames: [],
+      hostnames: [],
       phones: [],
       catchAllEmail: '',
       emailDomains: [],
@@ -82,8 +85,86 @@ const Storage = {
     };
   },
 
+  async getProfiles() {
+    const result = await api.storage.local.get(KEYS.IDENTITY);
+    const data = result[KEYS.IDENTITY];
+    if (data?.profiles) return data.profiles;
+    return [];
+  },
+
+  async saveProfiles(profiles) {
+    await api.storage.local.set({ [KEYS.IDENTITY]: { profiles } });
+  },
+
+  async addProfile(name) {
+    const profiles = await this.getProfiles();
+    const profile = { ...this._emptyProfile(), name: name || `Profile ${profiles.length + 1}` };
+    profiles.push(profile);
+    await this.saveProfiles(profiles);
+    return profile;
+  },
+
+  async updateProfile(id, updates) {
+    const profiles = await this.getProfiles();
+    const idx = profiles.findIndex((p) => p.id === id);
+    if (idx === -1) return null;
+    profiles[idx] = { ...profiles[idx], ...updates };
+    await this.saveProfiles(profiles);
+    return profiles[idx];
+  },
+
+  async deleteProfile(id) {
+    const profiles = await this.getProfiles();
+    const filtered = profiles.filter((p) => p.id !== id);
+    await this.saveProfiles(filtered);
+  },
+
+  // Merged identity: combines all active profiles into one identity object
+  // for the substitution engine (which expects a single identity)
+  async getIdentity() {
+    const profiles = await this.getProfiles();
+    const active = profiles.filter((p) => p.active);
+
+    if (active.length === 0) {
+      return { emails: [], names: [], usernames: [], hostnames: [], phones: [],
+        catchAllEmail: '', emailDomains: [], enabled: { emails: true, names: true, usernames: true, phones: true, paths: true } };
+    }
+
+    // Merge all active profiles
+    const merged = {
+      emails: [],
+      names: [],
+      usernames: [],
+      hostnames: [],
+      phones: [],
+      catchAllEmail: '',
+      emailDomains: [],
+      enabled: { emails: true, names: true, usernames: true, phones: true, paths: true },
+    };
+
+    for (const p of active) {
+      merged.emails.push(...(p.emails || []));
+      merged.names.push(...(p.names || []));
+      merged.usernames.push(...(p.usernames || []));
+      merged.hostnames.push(...(p.hostnames || []));
+      merged.phones.push(...(p.phones || []));
+      if (p.catchAllEmail && !merged.catchAllEmail) merged.catchAllEmail = p.catchAllEmail;
+      merged.emailDomains.push(...(p.emailDomains || []));
+    }
+
+    return merged;
+  },
+
+  // Legacy compat: saveIdentity saves to first profile
   async saveIdentity(identity) {
-    await api.storage.local.set({ [KEYS.IDENTITY]: identity });
+    const profiles = await this.getProfiles();
+    if (profiles.length === 0) {
+      const profile = { ...this._emptyProfile(), ...identity };
+      await this.saveProfiles([profile]);
+    } else {
+      profiles[0] = { ...profiles[0], ...identity };
+      await this.saveProfiles(profiles);
+    }
   },
 
   // --- Activity Log ---

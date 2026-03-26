@@ -46,7 +46,18 @@
 
     <!-- Identity Tab (Smart Patterns) -->
     <section class="tab-content active" id="tab-identity">
-      <p class="help-text">Tell Silent Send who you are. It auto-catches all variations.</p>
+      <!-- Profile selector -->
+      <div class="profile-bar">
+        <select id="profileSelect" class="select" style="flex:1"></select>
+        <button class="btn-icon" id="btnAddProfile" title="Add profile">+</button>
+        <button class="btn-icon" id="btnRenameProfile" title="Rename profile">&#x270E;</button>
+        <button class="btn-icon" id="btnDeleteProfile" title="Delete profile">&times;</button>
+        <label class="toggle" title="Enable/disable this profile" style="margin-left:4px">
+          <input type="checkbox" id="profileActive" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <p class="help-text">Each profile is a person/identity. All active profiles are protected simultaneously.</p>
 
       <div class="id-section">
         <div class="id-label">Names</div>

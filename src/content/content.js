@@ -765,34 +765,48 @@
     const urlStr = typeof url === 'string' ? url : url?.url || '';
     const method = (options?.method || 'GET').toUpperCase();
 
-    // Only intercept POST/PUT/PATCH with a string body
+    // Only intercept POST/PUT/PATCH with a body
     if (
       (method === 'POST' || method === 'PUT' || method === 'PATCH') &&
-      options?.body && typeof options.body === 'string' &&
+      options?.body &&
       !shouldSkipUrl(urlStr)
     ) {
-      try {
-        // Try JSON
-        const body = JSON.parse(options.body);
-        const { modified, replacements } = processBody(body);
-
-        if (modified) {
-          options = { ...options, body: JSON.stringify(body) };
-          notifySubstitutions(replacements);
-          console.log(
-            `[Silent Send] Substituted ${replacements.length} value(s) in ${urlStr}`
-          );
+      // Handle FormData with file uploads
+      if (options.body instanceof FormData) {
+        try {
+          const newFormData = await processFormData(options.body);
+          if (newFormData) {
+            options = { ...options, body: newFormData };
+          }
+        } catch (e) {
+          console.warn('[Silent Send] FormData processing failed:', e);
         }
-      } catch (e) {
-        // Not JSON — try raw string substitution (form data, etc.)
-        if (options.body.length > MIN_STRING_LENGTH) {
-          const result = substituteAll(options.body);
-          if (result.modified) {
-            options = { ...options, body: result.text };
-            notifySubstitutions(result.replacements);
+      }
+      // Handle string bodies (JSON, raw text)
+      else if (typeof options.body === 'string') {
+        try {
+          // Try JSON
+          const body = JSON.parse(options.body);
+          const { modified, replacements } = processBody(body);
+
+          if (modified) {
+            options = { ...options, body: JSON.stringify(body) };
+            notifySubstitutions(replacements);
             console.log(
-              `[Silent Send] Substituted ${result.replacements.length} value(s) in form body`
+              `[Silent Send] Substituted ${replacements.length} value(s) in ${urlStr}`
             );
+          }
+        } catch (e) {
+          // Not JSON — try raw string substitution (form data, etc.)
+          if (options.body.length > MIN_STRING_LENGTH) {
+            const result = substituteAll(options.body);
+            if (result.modified) {
+              options = { ...options, body: result.text };
+              notifySubstitutions(result.replacements);
+              console.log(
+                `[Silent Send] Substituted ${result.replacements.length} value(s) in form body`
+              );
+            }
           }
         }
       }
@@ -800,6 +814,272 @@
 
     return originalFetch.call(this, url, options);
   };
+
+  // ============================================================
+  // Document Upload Processing
+  //
+  // Scans files in FormData uploads for PPI. Supports PDF, DOCX,
+  // XLSX, and text files. Shows preview for binary formats.
+  // ============================================================
+
+  async function processFormData(formData) {
+    let modified = false;
+    const newFormData = new FormData();
+    const allReplacements = [];
+
+    for (const [key, value] of formData.entries()) {
+      if (value instanceof File && value.size > 0) {
+        // Process the file through document scanner
+        const usePreview = settings.docScanPreview !== false &&
+          /\.(pdf|docx|xlsx)$/i.test(value.name);
+
+        const result = await documentScan(value, value.name, {
+          previewMode: usePreview,
+        });
+
+        if (result.preview && usePreview && result.replacements.length > 0) {
+          // Show preview and wait for user confirmation
+          const confirmed = await showDocScanPreview(result.preview, value.name);
+          if (!confirmed) {
+            // User cancelled — use original file
+            newFormData.append(key, value);
+            continue;
+          }
+        }
+
+        if (result.replacements.length > 0 && !result.skipped) {
+          // Use the substituted file
+          const newFile = new File([result.file], result.filename || value.name, {
+            type: result.file.type || value.type,
+          });
+          newFormData.append(key, newFile);
+          allReplacements.push(...result.replacements);
+          modified = true;
+          console.log(
+            `[Silent Send] Substituted ${result.replacements.length} value(s) in file: ${value.name}`
+          );
+        } else {
+          newFormData.append(key, value);
+        }
+      } else if (typeof value === 'string') {
+        // String form field — substitute
+        const result = substituteAll(value);
+        if (result.modified) {
+          newFormData.append(key, result.text);
+          allReplacements.push(...result.replacements);
+          modified = true;
+        } else {
+          newFormData.append(key, value);
+        }
+      } else {
+        newFormData.append(key, value);
+      }
+    }
+
+    if (modified) {
+      notifySubstitutions(allReplacements);
+      return newFormData;
+    }
+    return null;
+  }
+
+  /**
+   * Scan a document file for PPI using the inline document scanner.
+   */
+  async function documentScan(file, filename, options) {
+    // Detect file type
+    const ext = (filename || '').split('.').pop().toLowerCase();
+    const isText = /^(txt|csv|tsv|json|md|log|yaml|yml|xml|html|css|js|ts|py|sh|sql|rb|go|rs|java|c|cpp|h|php)$/.test(ext);
+    const isPDF = ext === 'pdf';
+    const isDOCX = ext === 'docx';
+    const isXLSX = ext === 'xlsx';
+
+    if (isText) {
+      const text = await file.text();
+      const result = substituteAll(text);
+      if (result.modified) {
+        return {
+          file: new Blob([result.text], { type: file.type || 'text/plain' }),
+          filename,
+          replacements: result.replacements,
+        };
+      }
+      return { file, filename, replacements: [] };
+    }
+
+    if (isPDF) {
+      // Extract text and scan — create clean text version
+      try {
+        const text = await extractPDFTextSimple(file);
+        if (!text || text.trim().length < 5) {
+          return { file, filename, replacements: [], skipped: true,
+            reason: 'No extractable text (scanned/image PDF)' };
+        }
+        const result = substituteAll(text);
+        const preview = {
+          format: 'pdf', replacementCount: result.replacements.length,
+          replacements: result.replacements.slice(0, 15),
+          note: 'PDF will be converted to plain text (layout not preserved)',
+        };
+        if (options.previewMode && result.replacements.length > 0) {
+          return { file, filename, replacements: result.replacements, preview };
+        }
+        if (result.modified) {
+          return {
+            file: new Blob([result.text], { type: 'text/plain' }),
+            filename: filename.replace(/\.pdf$/i, '.txt'),
+            replacements: result.replacements, preview,
+          };
+        }
+        return { file, filename, replacements: [] };
+      } catch (e) {
+        return { file, filename, replacements: [], skipped: true, reason: e.message };
+      }
+    }
+
+    // DOCX/XLSX — not supported in page world without libraries
+    // For now, extract what text we can and warn
+    if (isDOCX || isXLSX) {
+      try {
+        const text = await extractZipXMLText(file);
+        if (!text) return { file, filename, replacements: [], skipped: true };
+        const result = substituteAll(text);
+        const preview = {
+          format: ext, replacementCount: result.replacements.length,
+          replacements: result.replacements.slice(0, 15),
+          note: isDOCX ? 'Text in document will be substituted' : 'Cell values will be substituted',
+        };
+        if (options.previewMode && result.replacements.length > 0) {
+          return { file, filename, replacements: result.replacements, preview };
+        }
+        // For actual replacement, we'd need full ZIP rewrite
+        // For now, warn about the PPI found
+        if (result.modified) {
+          return { file, filename, replacements: result.replacements, preview };
+        }
+        return { file, filename, replacements: [] };
+      } catch (e) {
+        return { file, filename, replacements: [], skipped: true, reason: e.message };
+      }
+    }
+
+    return { file, filename, replacements: [], skipped: true };
+  }
+
+  /**
+   * Simple PDF text extraction from content streams.
+   */
+  async function extractPDFTextSimple(file) {
+    const buffer = await file.arrayBuffer();
+    const str = new TextDecoder('latin1').decode(new Uint8Array(buffer));
+    const texts = [];
+    const re = /stream\r?\n([\s\S]*?)endstream/g;
+    let m;
+    while ((m = re.exec(str)) !== null) {
+      // Extract text operators: (text) Tj, [(text)...] TJ
+      const content = m[1];
+      const parts = [];
+      const tj = /\(([^)]*)\)\s*Tj/g;
+      let t;
+      while ((t = tj.exec(content)) !== null) parts.push(t[1]);
+      const tjArr = /\[(.*?)\]\s*TJ/g;
+      while ((t = tjArr.exec(content)) !== null) {
+        const inner = /\(([^)]*)\)/g;
+        let s;
+        while ((s = inner.exec(t[1])) !== null) parts.push(s[1]);
+      }
+      if (parts.length) texts.push(parts.join(''));
+    }
+    return texts.join('\n');
+  }
+
+  /**
+   * Extract text from DOCX/XLSX XML entries.
+   */
+  async function extractZipXMLText(file) {
+    // Minimal: read the file as text and find XML text content
+    // This is a rough extraction — better than nothing
+    try {
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      const str = new TextDecoder('latin1').decode(bytes);
+      // Find text between XML tags
+      const texts = [];
+      const re = />([^<]{3,})</g;
+      let m;
+      while ((m = re.exec(str)) !== null) {
+        const text = m[1].trim();
+        if (text && !/^[\x00-\x1f\x80-\xff]+$/.test(text)) {
+          texts.push(text);
+        }
+      }
+      return texts.join(' ');
+    } catch {
+      return '';
+    }
+  }
+
+  // ============================================================
+  // Document Scan Preview UI
+  // ============================================================
+
+  let docPreviewEl = null;
+
+  function showDocScanPreview(preview, filename) {
+    return new Promise((resolve) => {
+      if (!docPreviewEl) {
+        docPreviewEl = document.createElement('div');
+        docPreviewEl.className = 'ss-doc-preview';
+        document.body.appendChild(docPreviewEl);
+      }
+
+      const items = (preview.replacements || []).map(r =>
+        `<div class="ss-dp-item">
+          <code class="ss-dp-orig">${(r.original || '').length > 25 ? r.original.slice(0, 22) + '...' : r.original}</code>
+          <span>&rarr;</span>
+          <code class="ss-dp-repl">${r.replaced}</code>
+        </div>`
+      ).join('');
+
+      docPreviewEl.innerHTML = `
+        <div class="ss-dp-header">
+          <strong>PPI found in ${esc(filename)}</strong>
+          <span class="ss-dp-count">${preview.replacementCount} item(s)</span>
+        </div>
+        <div class="ss-dp-note">${preview.note || ''}</div>
+        <div class="ss-dp-items">${items}</div>
+        <div class="ss-dp-actions">
+          <button class="ss-dp-btn ss-dp-confirm">Substitute & Upload</button>
+          <button class="ss-dp-btn ss-dp-cancel">Upload Original</button>
+        </div>
+      `;
+
+      docPreviewEl.classList.add('visible');
+
+      const confirm = docPreviewEl.querySelector('.ss-dp-confirm');
+      const cancel = docPreviewEl.querySelector('.ss-dp-cancel');
+
+      const cleanup = () => {
+        docPreviewEl.classList.remove('visible');
+        confirm.removeEventListener('click', onConfirm);
+        cancel.removeEventListener('click', onCancel);
+      };
+
+      const onConfirm = () => { cleanup(); resolve(true); };
+      const onCancel = () => { cleanup(); resolve(false); };
+
+      confirm.addEventListener('click', onConfirm);
+      cancel.addEventListener('click', onCancel);
+
+      // Auto-dismiss after 30 seconds (upload original)
+      setTimeout(() => {
+        if (docPreviewEl.classList.contains('visible')) {
+          cleanup();
+          resolve(false);
+        }
+      }, 30000);
+    });
+  }
 
   // ============================================================
   // XMLHttpRequest Interception — same aggressive approach

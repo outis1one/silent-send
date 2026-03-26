@@ -1318,12 +1318,16 @@
   function revealInElement(el) {
     if (SKIP_REVEAL_TAGS.has(el.tagName)) return;
     if (el.classList?.contains('ss-reveal-badge')) return;
+    // Never touch contenteditable elements (chat input boxes)
+    if (el.isContentEditable) return;
 
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
         const parent = node.parentElement;
         if (parent && SKIP_REVEAL_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
         if (parent?.closest?.('.ss-autodetect-warning, .ss-presend-warning, .ss-reveal-badge')) return NodeFilter.FILTER_REJECT;
+        // Skip contenteditable areas (chat input)
+        if (parent?.closest?.('[contenteditable="true"]')) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }
     });
@@ -1346,8 +1350,15 @@
 
   function unrevealInElement(el) {
     if (SKIP_REVEAL_TAGS.has(el.tagName)) return;
+    if (el.isContentEditable) return;
 
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const parent = node.parentElement;
+        if (parent?.closest?.('[contenteditable="true"]')) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
     let textNode;
     while ((textNode = walker.nextNode())) {
       const original = originalTexts.get(textNode);
@@ -1374,6 +1385,7 @@
         const parent = node.parentElement;
         if (parent && SKIP_REVEAL_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
         if (parent?.closest?.('.ss-autodetect-warning, .ss-presend-warning, .ss-reveal-badge')) return NodeFilter.FILTER_REJECT;
+        if (parent?.closest?.('[contenteditable="true"]')) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }
     });
@@ -1454,10 +1466,16 @@
           // Only do text replacement in reveal mode
           if (settings.revealMode) {
             if (node.nodeType === Node.ELEMENT_NODE) {
-              if (!SKIP_REVEAL_TAGS.has(node.tagName)) {
+              // Skip contenteditable (chat input) and skipped tags
+              if (!SKIP_REVEAL_TAGS.has(node.tagName) &&
+                  !node.isContentEditable &&
+                  !node.closest?.('[contenteditable="true"]')) {
                 revealInElement(node);
               }
             } else if (node.nodeType === Node.TEXT_NODE) {
+              // Skip text nodes inside contenteditable
+              const parent = node.parentElement;
+              if (parent?.closest?.('[contenteditable="true"]')) continue;
               const text = node.textContent;
               if (text && text.length >= MIN_STRING_LENGTH) {
                 if (!originalTexts.has(node)) {
@@ -1479,6 +1497,8 @@
             const text = mutation.target.textContent;
             if (text && text.length >= MIN_STRING_LENGTH) {
               const parent = mutation.target.parentElement;
+              // Skip contenteditable (chat input)
+              if (parent?.closest?.('[contenteditable="true"]')) continue;
               if (parent && !SKIP_REVEAL_TAGS.has(parent.tagName)) {
                 if (!originalTexts.has(mutation.target)) {
                   originalTexts.set(mutation.target, text);

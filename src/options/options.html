@@ -160,16 +160,27 @@
             </div>
           </div>
 
-          <!-- Auth prompt (shown when key cache expired and sync needs decryption) -->
+          <!-- Auth prompt — first-device setup (password + optional TOTP) -->
           <div id="syncAuthPrompt" style="display:none;margin-top:10px;padding:10px;background:#fffbeb;border:1px solid #fcd34d;border-radius:6px">
-            <p style="font-size:12px;font-weight:500;margin:0 0 8px;color:#92400e">Authentication required — new sync data is available</p>
+            <p style="font-size:12px;font-weight:500;margin:0 0 8px;color:#92400e">Authentication required</p>
             <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
               <input type="password" id="syncAuthPassword" placeholder="Password" autocomplete="current-password"
                 style="flex:1;min-width:120px;font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px">
-              <input type="text" id="syncAuthTOTP" placeholder="TOTP code" autocomplete="one-time-code" inputmode="numeric" maxlength="6"
+              <input type="text" id="syncAuthTOTPForPassword" placeholder="TOTP code" autocomplete="one-time-code" inputmode="numeric" maxlength="6"
                 style="width:80px;font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;display:none">
               <button class="btn btn-primary btn-sm" id="btnSyncAuth">Unlock</button>
-              <button class="btn btn-sm" id="btnSyncAuthBiometric" style="display:none">Biometric</button>
+            </div>
+            <!-- Re-verify alternatives (shown when key exists but TTL expired) -->
+            <div id="reverifyOptions" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid #fde68a">
+              <p style="font-size:11px;color:#92400e;margin:0 0 6px">Or re-verify with any one of these:</p>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+                <button class="btn btn-sm" id="btnSyncAuthBiometric" style="display:none">Biometric / PIN</button>
+                <div id="totpReverifyGroup" style="display:none;display:flex;gap:4px;align-items:end">
+                  <input type="text" id="syncAuthTOTP" placeholder="TOTP code" autocomplete="one-time-code" inputmode="numeric" maxlength="6"
+                    style="width:80px;font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px">
+                  <button class="btn btn-sm" id="btnSyncAuthTOTP">Verify</button>
+                </div>
+              </div>
             </div>
             <div id="syncAuthStatus" style="font-size:11px;margin-top:4px;min-height:14px"></div>
           </div>

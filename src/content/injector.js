@@ -58,11 +58,16 @@
   // Load mappings and settings, then inject into page
   async function init() {
     const result = await api.storage.local.get(['ss_mappings', 'ss_identity', 'ss_settings']);
-    const mappings = result.ss_mappings || [];
     const settings = result.ss_settings || { enabled: true };
 
+    // Check if data is encrypted (locked) — pass empty config
+    // The background will send decrypted data via vault:unlocked when ready
+    const isLocked = result.ss_mappings?._ssLocalEncrypted ||
+                     result.ss_identity?._ssLocalEncrypted;
+    const mappings = isLocked ? [] : (result.ss_mappings || []);
+    const identityData = isLocked ? {} : (result.ss_identity || {});
+
     // Merge active profiles into a flat identity object for the content script
-    const identityData = result.ss_identity || {};
     const identity = mergeProfiles(identityData);
 
     // Inject the main interception script into the page's world
@@ -107,22 +112,44 @@
     });
 
     // Forward storage changes to the page script (merge profiles before sending)
+    // Skip encrypted blobs — background will send decrypted data via vault:unlocked
     api.storage.onChanged.addListener((changes) => {
       if (changes.ss_mappings || changes.ss_identity || changes.ss_settings) {
         const msg = { type: 'ss:config-updated' };
-        if (changes.ss_mappings) msg.mappings = changes.ss_mappings.newValue;
-        if (changes.ss_identity) msg.identity = mergeProfiles(changes.ss_identity.newValue);
+
+        if (changes.ss_mappings) {
+          const val = changes.ss_mappings.newValue;
+          if (!val?._ssLocalEncrypted) msg.mappings = val;
+        }
+        if (changes.ss_identity) {
+          const val = changes.ss_identity.newValue;
+          if (!val?._ssLocalEncrypted) msg.identity = mergeProfiles(val);
+        }
         if (changes.ss_settings) msg.settings = changes.ss_settings.newValue;
-        window.postMessage(msg, '*');
+
+        // Only post if we have something meaningful to send
+        if (msg.mappings || msg.identity || msg.settings) {
+          window.postMessage(msg, '*');
+        }
       }
     });
 
-    // Listen for settings updates from popup via runtime messages
-    api.runtime.onMessage.addListener((message) => {
+    // Listen for settings updates and vault unlock from background
+    api.runtime.onMessage.addListener(async (message) => {
       if (message.type === 'settings:updated') {
         window.postMessage({
           type: 'ss:config-updated',
           settings: message.settings,
+        }, '*');
+      }
+
+      // Vault unlocked — background sends pre-decrypted data
+      if (message.type === 'vault:unlocked') {
+        window.postMessage({
+          type: 'ss:config-updated',
+          mappings: message.mappings || [],
+          identity: message.identity || {},
+          settings: message.settings || {},
         }, '*');
       }
     });

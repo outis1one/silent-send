@@ -3,6 +3,8 @@ import SmartPatterns from '../lib/smart-patterns.js';
 import SecretScanner from '../lib/secret-scanner.js';
 import AutoDetect from '../lib/auto-detect.js';
 import Storage from '../lib/storage.js';
+import SilentSendSync from '../lib/sync.js';
+import SilentSendCrypto from '../lib/crypto.js';
 import api from '../lib/browser-polyfill.js';
 
 // --- State ---
@@ -18,6 +20,20 @@ const $$ = (sel) => document.querySelectorAll(sel);
 
 // --- Init ---
 document.addEventListener('DOMContentLoaded', async () => {
+  // Check if locked BEFORE trying to read sensitive data
+  const locked = await Storage.isLocked();
+  if (locked) {
+    showLockedUI();
+    return;
+  }
+
+  await initUnlockedUI();
+});
+
+async function initUnlockedUI() {
+  // Hide locked overlay, show normal UI
+  $('#lockedOverlay').style.display = 'none';
+
   mappings = await Storage.getMappings();
   profiles = await Storage.getProfiles();
   identity = await Storage.getIdentity();
@@ -191,7 +207,97 @@ document.addEventListener('DOMContentLoaded', async () => {
     e.preventDefault();
     api.runtime.openOptionsPage();
   });
-});
+
+  // Update privacy note based on encryption state
+  const encEnabled = await Storage._isAtRestEncryptionEnabled();
+  const encNote = $('#privacyEncNote');
+  if (encNote) {
+    encNote.style.display = encEnabled ? '' : 'none';
+  }
+}
+
+// --- Locked UI ---
+async function showLockedUI() {
+  // Hide all normal UI elements
+  const lockedOverlay = $('#lockedOverlay');
+  lockedOverlay.style.display = 'block';
+
+  // Check if TOTP is configured
+  const encConfig = await SilentSendSync._getSyncEncryption();
+  if (encConfig?.totpSecret) {
+    $('#unlockTOTP').style.display = '';
+  }
+
+  // Check if WebAuthn is available
+  if (encConfig?.webauthn && SilentSendCrypto.isWebAuthnAvailable()) {
+    const hasCred = await SilentSendCrypto.hasWebAuthnCredential();
+    if (hasCred) {
+      $('#btnUnlockBiometric').style.display = '';
+    }
+  }
+
+  // Unlock with password (+ optional TOTP)
+  $('#btnUnlock').addEventListener('click', async () => {
+    const password = $('#unlockPassword').value;
+    const totpCode = $('#unlockTOTP').value;
+
+    if (!password) {
+      $('#unlockStatus').textContent = 'Enter your password.';
+      return;
+    }
+
+    $('#unlockStatus').textContent = 'Unlocking...';
+    $('#unlockStatus').style.color = '#6b7280';
+
+    const result = await SilentSendSync.authenticate(password, totpCode || undefined);
+    if (result.success) {
+      $('#unlockStatus').textContent = '';
+      // Notify background to clear LOCK badge
+      api.runtime.sendMessage({ type: 'vault:unlocked' }).catch(() => {});
+      // Transition to normal UI
+      await initUnlockedUI();
+    } else {
+      $('#unlockStatus').textContent = result.reason;
+      $('#unlockStatus').style.color = '#dc2626';
+    }
+  });
+
+  // Enter key triggers unlock
+  $('#unlockPassword').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') $('#btnUnlock').click();
+  });
+  $('#unlockTOTP').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') $('#btnUnlock').click();
+  });
+
+  // Unlock with biometric
+  $('#btnUnlockBiometric').addEventListener('click', async () => {
+    $('#unlockStatus').textContent = 'Waiting for biometric...';
+    $('#unlockStatus').style.color = '#6b7280';
+
+    const verified = await SilentSendCrypto.webAuthnAuthenticate();
+    if (verified) {
+      const ttlDays = encConfig?.ttlDays ?? 90;
+      await SilentSendCrypto.markVerified(ttlDays);
+
+      // The key should already be in IndexedDB from prior session
+      const cached = await SilentSendCrypto.getCachedKey();
+      if (cached) {
+        api.runtime.sendMessage({ type: 'vault:unlocked' }).catch(() => {});
+        await initUnlockedUI();
+      } else {
+        $('#unlockStatus').textContent = 'Key not found. Enter password.';
+        $('#unlockStatus').style.color = '#dc2626';
+      }
+    } else {
+      $('#unlockStatus').textContent = 'Biometric failed.';
+      $('#unlockStatus').style.color = '#dc2626';
+    }
+  });
+
+  // Focus password field
+  setTimeout(() => $('#unlockPassword').focus(), 100);
+}
 
 // --- Profiles ---
 function renderProfileSelector() {

@@ -242,29 +242,37 @@ const SilentSendCrypto = {
   },
 
   /**
-   * Cache a CryptoKey with a TTL.
+   * Cache a CryptoKey persistently.
+   * The key stays in IndexedDB indefinitely — it's only cleared if
+   * the user explicitly disables encryption or clears browser data.
+   * The TTL controls when re-verification (via WebAuthn) is required,
+   * NOT when the key is deleted.
+   *
    * @param {CryptoKey} key
    * @param {string} salt - base64-encoded salt used to derive this key
-   * @param {number} ttlDays - 0 = session only, -1 = never expire
+   * @param {number} ttlDays - re-verify interval: 0 = each session, -1 = never
    */
   async cacheKey(key, salt, ttlDays = 90) {
     const db = await this._openCacheDB();
-    const expiresAt = ttlDays === -1
-      ? -1 // never
+    const reverifyAt = ttlDays === -1
+      ? -1 // never re-verify
       : ttlDays === 0
-        ? 0 // session only (cleared on browser restart by the caller)
+        ? 0 // re-verify each session
         : Date.now() + ttlDays * 86400000;
 
     return new Promise((resolve, reject) => {
       const tx = db.transaction('keys', 'readwrite');
-      tx.objectStore('keys').put({ key, salt, expiresAt, cachedAt: Date.now() }, 'syncKey');
+      tx.objectStore('keys').put({ key, salt, reverifyAt, cachedAt: Date.now() }, 'syncKey');
       tx.oncomplete = resolve;
       tx.onerror = () => reject(tx.error);
     });
   },
 
   /**
-   * Retrieve cached key if not expired.
+   * Retrieve cached key. The key is always returned if it exists —
+   * it never expires or self-deletes. Use needsReverification() to
+   * check if the user should re-verify via WebAuthn.
+   *
    * Returns { key: CryptoKey, salt: string } or null.
    */
   async getCachedKey() {
@@ -275,28 +283,68 @@ const SilentSendCrypto = {
         const req = tx.objectStore('keys').get('syncKey');
         req.onsuccess = () => {
           const entry = req.result;
-          if (!entry) return resolve(null);
-
-          // Check expiry
-          if (entry.expiresAt === -1) {
-            // Never expires
-            resolve({ key: entry.key, salt: entry.salt });
-          } else if (entry.expiresAt === 0) {
-            // Session only — always valid until explicitly cleared
-            resolve({ key: entry.key, salt: entry.salt });
-          } else if (Date.now() < entry.expiresAt) {
-            resolve({ key: entry.key, salt: entry.salt });
-          } else {
-            // Expired — clean up
-            this.clearCachedKey();
-            resolve(null);
-          }
+          if (!entry?.key) return resolve(null);
+          resolve({ key: entry.key, salt: entry.salt });
         };
         req.onerror = () => resolve(null);
       });
     } catch {
       return null;
     }
+  },
+
+  /**
+   * Check if the cached key needs re-verification (TTL expired).
+   * This does NOT delete the key — it just signals that the user
+   * should re-verify via WebAuthn/biometric before using it.
+   */
+  async needsReverification() {
+    try {
+      const db = await this._openCacheDB();
+      return new Promise((resolve) => {
+        const tx = db.transaction('keys', 'readonly');
+        const req = tx.objectStore('keys').get('syncKey');
+        req.onsuccess = () => {
+          const entry = req.result;
+          if (!entry) return resolve(false); // no key = nothing to re-verify
+          if (entry.reverifyAt === -1) return resolve(false); // never
+          if (entry.reverifyAt === 0) return resolve(true); // each session
+          resolve(Date.now() >= entry.reverifyAt);
+        };
+        req.onerror = () => resolve(false);
+      });
+    } catch {
+      return false;
+    }
+  },
+
+  /**
+   * Mark the cached key as freshly verified (resets the TTL timer).
+   */
+  async markVerified(ttlDays = 90) {
+    try {
+      const db = await this._openCacheDB();
+      const entry = await new Promise((resolve) => {
+        const tx = db.transaction('keys', 'readonly');
+        const req = tx.objectStore('keys').get('syncKey');
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => resolve(null);
+      });
+      if (!entry) return;
+
+      entry.reverifyAt = ttlDays === -1
+        ? -1
+        : ttlDays === 0
+          ? 0
+          : Date.now() + ttlDays * 86400000;
+
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction('keys', 'readwrite');
+        tx.objectStore('keys').put(entry, 'syncKey');
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch { /* non-fatal */ }
   },
 
   async clearCachedKey() {
@@ -312,12 +360,14 @@ const SilentSendCrypto = {
   },
 
   // ----------------------------------------------------------------
-  // WebAuthn — biometric/PIN unlock as re-authentication gate
+  // WebAuthn — biometric/PIN as PRIMARY re-authentication
   //
-  // On first setup, we create a credential tied to this origin.
-  // On re-auth, we verify the credential — if it passes, we release
-  // the cached key. WebAuthn doesn't produce an encryption key;
-  // it gates access to the IndexedDB-cached CryptoKey.
+  // On first setup (per device), the user enters their password once
+  // to derive the encryption key. A WebAuthn credential is registered
+  // on that device. From then on, ALL re-verification uses biometrics
+  // — the password is never needed again on that device unless
+  // IndexedDB is cleared. The CryptoKey persists indefinitely in
+  // IndexedDB; WebAuthn just gates access when TTL expires.
   // ----------------------------------------------------------------
 
   /**

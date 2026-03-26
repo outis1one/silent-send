@@ -869,45 +869,67 @@ async function initSyncEncryptionUI() {
     }
   });
 
-  // Auth prompt — Unlock button
+  // Auth prompt — Unlock with password (first-device or re-verify)
   $('#btnSyncAuth').addEventListener('click', async () => {
     const password = $('#syncAuthPassword').value;
-    const totpCode = $('#syncAuthTOTP').value;
+    const totpCode = $('#syncAuthTOTPForPassword').value;
 
     if (!password) {
       setSyncAuthStatus('Enter your password.', 'warn');
       return;
     }
 
-    const result = await SilentSendSync.authenticate(password, totpCode || undefined);
+    // Check if this is re-verification (key exists) or first-device (needs full auth)
+    const cached = await SilentSendCrypto.getCachedKey();
+    let result;
+    if (cached) {
+      // Re-verification — password alone is enough
+      result = await SilentSendSync.reverifyWithPassword(password);
+    } else {
+      // First device — full auth with password + TOTP if configured
+      result = await SilentSendSync.authenticate(password, totpCode || undefined);
+    }
+
     if (result.success) {
       $('#syncAuthPrompt').style.display = 'none';
       $('#syncAuthPassword').value = '';
-      $('#syncAuthTOTP').value = '';
-      setSyncEncStatus('Authenticated. Sync data unlocked.', 'ok');
+      $('#syncAuthTOTPForPassword').value = '';
+      setSyncEncStatus(cached ? 'Re-verified with password.' : 'Authenticated. Sync data unlocked.', 'ok');
     } else {
       setSyncAuthStatus(result.reason, 'error');
     }
   });
 
-  // Auth prompt — Biometric button
+  // Re-verify with TOTP alone (key must already exist)
+  $('#btnSyncAuthTOTP').addEventListener('click', async () => {
+    const totpCode = $('#syncAuthTOTP').value;
+    if (!totpCode || totpCode.length < 6) {
+      setSyncAuthStatus('Enter your 6-digit TOTP code.', 'warn');
+      return;
+    }
+
+    const result = await SilentSendSync.reverifyWithTOTP(totpCode);
+    if (result.success) {
+      $('#syncAuthPrompt').style.display = 'none';
+      $('#syncAuthTOTP').value = '';
+      setSyncEncStatus('Re-verified with TOTP.', 'ok');
+    } else {
+      setSyncAuthStatus(result.reason, 'error');
+    }
+  });
+
+  // Re-verify with biometric/PIN (key must already exist)
   $('#btnSyncAuthBiometric').addEventListener('click', async () => {
     setSyncAuthStatus('Waiting for biometric...', 'neutral');
     const verified = await SilentSendCrypto.webAuthnAuthenticate();
     if (verified) {
-      // Try to recover wrapped key
-      const wrapped = await SilentSendSync._getWrappedKey();
-      if (wrapped) {
-        const config = await SilentSendSync._getSyncEncryption();
-        const ttlDays = config?.ttlDays ?? 90;
-        await SilentSendCrypto.cacheKey(wrapped.key, wrapped.salt, ttlDays);
-        $('#syncAuthPrompt').style.display = 'none';
-        setSyncEncStatus('Authenticated via biometric. Sync data unlocked.', 'ok');
-      } else {
-        setSyncAuthStatus('Biometric verified but key not found. Enter password.', 'warn');
-      }
+      const config = await SilentSendSync._getSyncEncryption();
+      const ttlDays = config?.ttlDays ?? 90;
+      await SilentSendCrypto.markVerified(ttlDays);
+      $('#syncAuthPrompt').style.display = 'none';
+      setSyncEncStatus('Re-verified via biometric.', 'ok');
     } else {
-      setSyncAuthStatus('Biometric verification failed.', 'error');
+      setSyncAuthStatus('Biometric failed. Try TOTP or password.', 'error');
     }
   });
 }
@@ -923,20 +945,26 @@ async function showEncryptionConfigured() {
     else if (config.authMethod === 'totp') parts.push('TOTP');
     else parts.push('Password');
 
-    if (config.webauthn) parts.push('Biometric');
+    if (config.webauthn) parts.push('Biometric re-auth');
 
-    const ttl = config.ttlDays === -1 ? 'never re-auth'
-      : config.ttlDays === 0 ? 'each session'
-      : `every ${config.ttlDays}d`;
+    const ttl = config.ttlDays === -1 ? 'never re-verify'
+      : config.ttlDays === 0 ? 're-verify each session'
+      : `re-verify every ${config.ttlDays}d`;
     parts.push(ttl);
 
     $('#encryptionInfo').textContent = `(${parts.join(' · ')})`;
   }
 
-  // Check if auth is currently needed
+  // Check if password entry is needed (first time on this device)
   const needsAuth = await SilentSendSync.needsAuth();
   if (needsAuth) {
-    showSyncAuthPrompt();
+    showSyncAuthPrompt('first-device');
+  } else {
+    // Key exists — check if re-verification is needed
+    const needsReverify = await SilentSendSync.needsReverification();
+    if (needsReverify) {
+      showSyncAuthPrompt('reverify');
+    }
   }
 }
 
@@ -947,22 +975,62 @@ function showEncryptionNotConfigured() {
   $('#totpSetupResult').style.display = 'none';
 }
 
-async function showSyncAuthPrompt() {
+/**
+ * Show the auth prompt.
+ * @param {'first-device'|'reverify'|'decrypt'} mode
+ *
+ * first-device: No cached key — password (+ TOTP if configured) required.
+ * reverify:     Key exists but TTL expired — any ONE of: biometric / TOTP / password.
+ * decrypt:      Encrypted data arrived — same as first-device if no key, reverify if key exists.
+ */
+async function showSyncAuthPrompt(mode = 'decrypt') {
   const config = await SilentSendSync._getSyncEncryption();
-  $('#syncAuthPrompt').style.display = 'block';
+  const promptEl = $('#syncAuthPrompt');
+  promptEl.style.display = 'block';
 
-  // Show TOTP field if needed
-  if (config?.totpSecret) {
-    $('#syncAuthTOTP').style.display = '';
+  const isReverify = (mode === 'reverify') ||
+    (mode === 'decrypt' && await SilentSendCrypto.getCachedKey());
+
+  // Adjust header message
+  const headerEl = promptEl.querySelector('p');
+  if (mode === 'first-device') {
+    headerEl.textContent = 'First time on this device — enter your sync encryption password';
+  } else if (isReverify) {
+    headerEl.textContent = 'Re-verification required — use any method below';
   } else {
-    $('#syncAuthTOTP').style.display = 'none';
+    headerEl.textContent = 'First time on this device — enter your sync encryption password';
   }
 
-  // Show biometric button if available
-  if (config?.webauthn && SilentSendCrypto.isWebAuthnAvailable()) {
-    const hasCred = await SilentSendCrypto.hasWebAuthnCredential();
-    $('#btnSyncAuthBiometric').style.display = hasCred ? '' : 'none';
+  // First-device: show TOTP alongside password if configured
+  const hasTOTP = config?.totpSecret || config?._totpEncrypted;
+  if (!isReverify && hasTOTP) {
+    $('#syncAuthTOTPForPassword').style.display = '';
   } else {
+    $('#syncAuthTOTPForPassword').style.display = 'none';
+  }
+
+  // Re-verify alternatives section
+  const reverifyOpts = $('#reverifyOptions');
+  if (isReverify) {
+    reverifyOpts.style.display = 'block';
+
+    // Biometric button
+    if (config?.webauthn && SilentSendCrypto.isWebAuthnAvailable()) {
+      const hasCred = await SilentSendCrypto.hasWebAuthnCredential();
+      $('#btnSyncAuthBiometric').style.display = hasCred ? '' : 'none';
+    } else {
+      $('#btnSyncAuthBiometric').style.display = 'none';
+    }
+
+    // TOTP re-verify option
+    const totpGroup = $('#totpReverifyGroup');
+    if (hasTOTP) {
+      totpGroup.style.display = 'flex';
+    } else {
+      totpGroup.style.display = 'none';
+    }
+  } else {
+    reverifyOpts.style.display = 'none';
     $('#btnSyncAuthBiometric').style.display = 'none';
   }
 }

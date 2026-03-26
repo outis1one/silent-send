@@ -153,6 +153,44 @@ const messageHandlers = {
     api.action.setBadgeBackgroundColor({ color: '#6b7280' });
   },
 
+  async 'get:locked-state'(_message, _sender, sendResponse) {
+    const locked = await Storage.isLocked();
+    sendResponse({ locked });
+  },
+
+  async 'vault:unlocked'() {
+    // User unlocked the vault — clear the LOCK badge and refresh icon
+    api.action.setBadgeText({ text: '' });
+    const settings = await Storage.getSettings();
+    await updateIcon(settings);
+
+    // Now that we're unlocked, try syncing
+    if (settings.browserSync) {
+      await SilentSendSync.pullFromSyncStorage();
+    }
+
+    // Read decrypted data via Storage module and send to all content scripts
+    const mappings = await Storage.getMappings();
+    const identity = await Storage.getIdentity();
+
+    const allPatterns = [...BUILTIN_URL_PATTERNS];
+    const customDomains = settings.customDomains || [];
+    for (const domain of customDomains) {
+      allPatterns.push(domain + '/*');
+    }
+    for (const urlPattern of allPatterns) {
+      const tabs = await api.tabs.query({ url: urlPattern }).catch(() => []);
+      for (const tab of tabs) {
+        api.tabs.sendMessage(tab.id, {
+          type: 'vault:unlocked',
+          mappings,
+          identity,
+          settings,
+        }).catch(() => {});
+      }
+    }
+  },
+
   async 'update:settings'(message) {
     await Storage.saveSettings(message.settings);
 
@@ -371,6 +409,14 @@ api.runtime.onInstalled.addListener(async () => {
 (async () => {
   const settings = await Storage.getSettings();
   await updateIcon(settings);
+
+  // Check if extension is locked (encrypted data, no cached key)
+  const locked = await Storage.isLocked();
+  if (locked) {
+    api.action.setBadgeText({ text: 'LOCK' });
+    api.action.setBadgeBackgroundColor({ color: '#dc2626' });
+    return; // don't try to sync while locked
+  }
 
   // Restore the SYN badge if the user hasn't opened Options since the last sync
   const stored = await api.storage.local.get('ss_sync_notification');

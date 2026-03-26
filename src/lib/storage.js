@@ -3,9 +3,18 @@
  *
  * Wraps browser/api.storage.local with typed helpers for mappings,
  * activity log, and settings.
+ *
+ * When at-rest encryption is enabled, sensitive data (identity, mappings,
+ * activity log) is AES-encrypted before writing to storage.local and
+ * decrypted on read. The encryption key comes from the key cache in
+ * IndexedDB (derived from the user's password on first setup).
+ *
+ * Non-sensitive data (settings, sync metadata) remains plaintext so the
+ * extension can function in a "locked" state (showing the unlock prompt).
  */
 
 import api from './browser-polyfill.js';
+import SilentSendCrypto from './crypto.js';
 
 const KEYS = {
   MAPPINGS: 'ss_mappings',
@@ -13,6 +22,13 @@ const KEYS = {
   LOG: 'ss_activity_log',
   SETTINGS: 'ss_settings',
 };
+
+// Keys that contain sensitive PPI and should be encrypted at rest
+// All user data keys are encrypted at rest — settings included since
+// custom domains and configuration can reveal what services the user
+// accesses. Only ss_sync_encryption (salt, verification blob) and
+// ss_lastModified stay plaintext for bootstrap purposes.
+const ENCRYPTED_KEYS = new Set([KEYS.MAPPINGS, KEYS.IDENTITY, KEYS.LOG, KEYS.SETTINGS]);
 
 const DEFAULT_SETTINGS = {
   enabled: true,
@@ -29,15 +45,128 @@ const DEFAULT_SETTINGS = {
 };
 
 const Storage = {
+  // ----------------------------------------------------------------
+  // At-rest encryption helpers
+  // ----------------------------------------------------------------
+
+  /**
+   * Check if at-rest encryption is enabled.
+   * At-rest encryption piggybacks on sync encryption — if the user
+   * has set up sync encryption, local storage is also encrypted.
+   */
+  async _isAtRestEncryptionEnabled() {
+    const result = await api.storage.local.get('ss_sync_encryption');
+    return !!result.ss_sync_encryption?.enabled;
+  },
+
+  /**
+   * Read a potentially-encrypted value from storage.
+   * Returns the decrypted value, or null if locked.
+   */
+  async _readSecure(key) {
+    const result = await api.storage.local.get(key);
+    const value = result[key];
+
+    // Not encrypted — return as-is
+    if (!value || !value._ssLocalEncrypted) return value || null;
+
+    // Encrypted — need the cached key
+    const cached = await SilentSendCrypto.getCachedKey();
+    if (!cached) return null; // locked
+
+    try {
+      return await SilentSendCrypto.decryptWithKey(value.data, cached.key);
+    } catch {
+      return null; // corrupted or wrong key
+    }
+  },
+
+  /**
+   * Write a value to storage, encrypting if at-rest encryption is enabled.
+   */
+  async _writeSecure(key, value, extras = {}) {
+    const isEncEnabled = await this._isAtRestEncryptionEnabled();
+
+    if (isEncEnabled && ENCRYPTED_KEYS.has(key)) {
+      const cached = await SilentSendCrypto.getCachedKey();
+      if (cached) {
+        const encrypted = await SilentSendCrypto.encryptWithKey(value, cached.key);
+        await api.storage.local.set({
+          [key]: { _ssLocalEncrypted: true, data: encrypted },
+          ...extras,
+        });
+        return;
+      }
+      // No key available — fall through to plaintext (shouldn't happen
+      // if the UI flow is correct, but better than losing data)
+    }
+
+    await api.storage.local.set({ [key]: value, ...extras });
+  },
+
+  /**
+   * Check if the extension is in a locked state (encrypted data, no key).
+   */
+  async isLocked() {
+    const isEncEnabled = await this._isAtRestEncryptionEnabled();
+    if (!isEncEnabled) return false;
+
+    const cached = await SilentSendCrypto.getCachedKey();
+    if (cached) return false;
+
+    return true;
+  },
+
+  /**
+   * Encrypt all existing plaintext sensitive data after encryption is
+   * first enabled. Called once when the user sets up sync encryption.
+   */
+  async encryptExistingData() {
+    const cached = await SilentSendCrypto.getCachedKey();
+    if (!cached) return;
+
+    for (const key of ENCRYPTED_KEYS) {
+      const result = await api.storage.local.get(key);
+      const value = result[key];
+      // Skip if already encrypted or empty
+      if (!value || value._ssLocalEncrypted) continue;
+
+      const encrypted = await SilentSendCrypto.encryptWithKey(value, cached.key);
+      await api.storage.local.set({
+        [key]: { _ssLocalEncrypted: true, data: encrypted },
+      });
+    }
+  },
+
+  /**
+   * Decrypt all encrypted data back to plaintext. Called when the user
+   * disables sync encryption.
+   */
+  async decryptAllData() {
+    const cached = await SilentSendCrypto.getCachedKey();
+    if (!cached) return;
+
+    for (const key of ENCRYPTED_KEYS) {
+      const result = await api.storage.local.get(key);
+      const value = result[key];
+      if (!value?._ssLocalEncrypted) continue;
+
+      try {
+        const decrypted = await SilentSendCrypto.decryptWithKey(value.data, cached.key);
+        await api.storage.local.set({ [key]: decrypted });
+      } catch { /* leave encrypted if decryption fails */ }
+    }
+  },
+
   // --- Mappings ---
 
   async getMappings() {
-    const result = await api.storage.local.get(KEYS.MAPPINGS);
-    return result[KEYS.MAPPINGS] || [];
+    const data = await this._readSecure(KEYS.MAPPINGS);
+    return data || [];
   },
 
   async saveMappings(mappings) {
-    await api.storage.local.set({ [KEYS.MAPPINGS]: mappings, ss_lastModified: Date.now() });
+    await this._writeSecure(KEYS.MAPPINGS, mappings, { ss_lastModified: Date.now() });
   },
 
   async addMapping(mapping) {
@@ -90,14 +219,13 @@ const Storage = {
   },
 
   async getProfiles() {
-    const result = await api.storage.local.get(KEYS.IDENTITY);
-    const data = result[KEYS.IDENTITY];
+    const data = await this._readSecure(KEYS.IDENTITY);
     if (data?.profiles) return data.profiles;
     return [];
   },
 
   async saveProfiles(profiles) {
-    await api.storage.local.set({ [KEYS.IDENTITY]: { profiles }, ss_lastModified: Date.now() });
+    await this._writeSecure(KEYS.IDENTITY, { profiles }, { ss_lastModified: Date.now() });
   },
 
   async addProfile(name) {
@@ -174,8 +302,8 @@ const Storage = {
   // --- Activity Log ---
 
   async getLog() {
-    const result = await api.storage.local.get(KEYS.LOG);
-    return result[KEYS.LOG] || [];
+    const data = await this._readSecure(KEYS.LOG);
+    return data || [];
   },
 
   async addLogEntry(entry) {
@@ -193,26 +321,30 @@ const Storage = {
       log.length = settings.maxLogEntries;
     }
 
-    await api.storage.local.set({ [KEYS.LOG]: log });
+    await this._writeSecure(KEYS.LOG, log);
   },
 
   async clearLog() {
-    await api.storage.local.set({ [KEYS.LOG]: [] });
+    await this._writeSecure(KEYS.LOG, []);
   },
 
   // --- Settings ---
+  // Settings are encrypted at rest (custom domains can reveal which
+  // private AI services the user accesses). When locked, defaults are
+  // returned so the extension can show basic UI.
 
   async getSettings() {
-    const result = await api.storage.local.get(KEYS.SETTINGS);
-    return { ...DEFAULT_SETTINGS, ...(result[KEYS.SETTINGS] || {}) };
+    const data = await this._readSecure(KEYS.SETTINGS);
+    return { ...DEFAULT_SETTINGS, ...(data || {}) };
   },
 
   async saveSettings(settings) {
     const current = await this.getSettings();
-    await api.storage.local.set({
-      [KEYS.SETTINGS]: { ...current, ...settings },
-      ss_lastModified: Date.now(),
-    });
+    await this._writeSecure(
+      KEYS.SETTINGS,
+      { ...current, ...settings },
+      { ss_lastModified: Date.now() },
+    );
   },
 };
 

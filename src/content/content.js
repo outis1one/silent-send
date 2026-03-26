@@ -283,7 +283,7 @@
   }
 
   // ============================================================
-  // Process a JSON body — handles all known Claude API shapes
+  // Process a JSON body — handles all known AI service API shapes
   // ============================================================
   function processBody(body) {
     let modified = false;
@@ -298,43 +298,93 @@
       return r;
     }
 
-    // Shape 1: { prompt: "..." }
-    if (typeof body.prompt === 'string') {
-      const r = processText(body.prompt);
-      if (r.modified) body.prompt = r.text;
-    }
-
-    // Shape 2: { content: [{ type: "text", text: "..." }] }
-    if (Array.isArray(body.content)) {
-      for (let i = 0; i < body.content.length; i++) {
-        const item = body.content[i];
-        if (item.type === 'text' && typeof item.text === 'string') {
-          const r = processText(item.text);
-          if (r.modified) body.content[i] = { ...item, text: r.text };
-        }
+    // Walk any string values that look like user content
+    function walkAndSubstitute(obj, key) {
+      if (typeof obj[key] === 'string' && obj[key].length > 0) {
+        const r = processText(obj[key]);
+        if (r.modified) obj[key] = r.text;
       }
     }
 
-    // Shape 3: { messages: [{ role: "user", content: "..." }] }
+    // --- Claude: { prompt: "..." } ---
+    if (typeof body.prompt === 'string') {
+      walkAndSubstitute(body, 'prompt');
+    }
+
+    // --- Claude / OpenAI / OpenWebUI: { messages: [{ role, content }] } ---
     if (Array.isArray(body.messages)) {
       for (const msg of body.messages) {
         if (msg.role !== 'user' && msg.role !== 'human') continue;
 
         if (typeof msg.content === 'string') {
-          const r = processText(msg.content);
-          if (r.modified) msg.content = r.text;
+          walkAndSubstitute(msg, 'content');
         }
 
         if (Array.isArray(msg.content)) {
           for (let j = 0; j < msg.content.length; j++) {
-            if (msg.content[j].type === 'text') {
-              const r = processText(msg.content[j].text);
-              if (r.modified) msg.content[j] = { ...msg.content[j], text: r.text };
+            const part = msg.content[j];
+            if (typeof part === 'string') {
+              const r = processText(part);
+              if (r.modified) msg.content[j] = r.text;
+            } else if (part?.type === 'text' && typeof part.text === 'string') {
+              walkAndSubstitute(part, 'text');
             }
           }
         }
       }
     }
+
+    // --- Claude: { content: [{ type: "text", text }] } ---
+    if (Array.isArray(body.content) && !Array.isArray(body.messages)) {
+      for (let i = 0; i < body.content.length; i++) {
+        const item = body.content[i];
+        if (item.type === 'text' && typeof item.text === 'string') {
+          walkAndSubstitute(item, 'text');
+        }
+      }
+    }
+
+    // --- ChatGPT: { action: "next", messages: [{ content: { parts: ["..."] } }] } ---
+    if (Array.isArray(body.messages)) {
+      for (const msg of body.messages) {
+        if (msg.content?.parts && Array.isArray(msg.content.parts)) {
+          for (let i = 0; i < msg.content.parts.length; i++) {
+            if (typeof msg.content.parts[i] === 'string') {
+              const r = processText(msg.content.parts[i]);
+              if (r.modified) msg.content.parts[i] = r.text;
+            }
+          }
+        }
+      }
+    }
+
+    // --- Gemini: nested prompts in f.req batch RPC (text strings in arrays) ---
+    // Gemini uses a complex nested array format. We recursively find strings.
+    if (Array.isArray(body) || body?.fReq) {
+      function walkArray(arr) {
+        for (let i = 0; i < arr.length; i++) {
+          if (typeof arr[i] === 'string' && arr[i].length > 2) {
+            const r = processText(arr[i]);
+            if (r.modified) arr[i] = r.text;
+          } else if (Array.isArray(arr[i])) {
+            walkArray(arr[i]);
+          }
+        }
+      }
+      if (Array.isArray(body)) walkArray(body);
+    }
+
+    // --- Grok: { message: "...", messages: [...] } ---
+    if (typeof body.message === 'string') {
+      walkAndSubstitute(body, 'message');
+    }
+
+    // --- OpenWebUI: { prompt: "...", messages: [...], model: "..." } ---
+    // Already handled by 'prompt' and 'messages' above
+
+    // --- Generic: { query: "..." } or { input: "..." } ---
+    if (typeof body.query === 'string') walkAndSubstitute(body, 'query');
+    if (typeof body.input === 'string') walkAndSubstitute(body, 'input');
 
     return { modified, replacements: allReplacements };
   }
@@ -351,6 +401,34 @@
   }
 
   // ============================================================
+  // API URL Detection — matches known AI service endpoints
+  // ============================================================
+  const API_PATTERNS = [
+    // Claude
+    /\/api\/organizations\/.*\/(chat_conversations|completion|messages)/,
+    // ChatGPT / OpenAI
+    /\/backend-api\/conversation/,
+    /\/api\/conversation/,
+    /\/v1\/chat\/completions/,
+    // Grok
+    /\/i\/api\/graphql.*grok/i,
+    /grok.*\/api\//,
+    /\/2\/grok\/add_response/,
+    // Gemini
+    /\/_\/BardChatUi\/data\//,
+    /\/google\.internal\.gemini/,
+    /generativelanguage.*generateContent/,
+    // OpenWebUI (self-hosted, various paths)
+    /\/api\/chat\/?/,
+    /\/ollama\/api\/chat/,
+    /\/api\/v1\/chat\/completions/,
+  ];
+
+  function isTargetApiUrl(url) {
+    return API_PATTERNS.some(pattern => pattern.test(url));
+  }
+
+  // ============================================================
   // Fetch Interception
   // ============================================================
   const originalFetch = window.fetch;
@@ -361,14 +439,10 @@
     }
 
     const urlStr = typeof url === 'string' ? url : url?.url || '';
-    const isTargetApi =
-      urlStr.includes('/api/organizations/') &&
-      (urlStr.includes('/chat_conversations/') ||
-        urlStr.includes('/completion') ||
-        urlStr.includes('/messages'));
 
-    if (isTargetApi && options?.body && typeof options.body === 'string') {
+    if (isTargetApiUrl(urlStr) && options?.body && typeof options.body === 'string') {
       try {
+        // Try JSON first (most services)
         const body = JSON.parse(options.body);
         const { modified, replacements } = processBody(body);
 
@@ -380,7 +454,19 @@
           );
         }
       } catch (e) {
-        // Not JSON — pass through
+        // Not JSON — try form-encoded (Gemini uses f.req param)
+        try {
+          if (options.body.includes('f.req=') || options.body.includes('at=')) {
+            const result = substituteAll(options.body);
+            if (result.modified) {
+              options = { ...options, body: result.text };
+              notifySubstitutions(result.replacements);
+              console.log(
+                `[Silent Send] Substituted ${result.replacements.length} value(s) in form request`
+              );
+            }
+          }
+        } catch (e2) { /* pass through */ }
       }
     }
 
@@ -402,9 +488,7 @@
     if (
       settings.enabled && hasSubstitutions() &&
       typeof body === 'string' && this._ssUrl &&
-      (this._ssUrl.includes('/chat_conversations/') ||
-        this._ssUrl.includes('/completion') ||
-        this._ssUrl.includes('/messages'))
+      isTargetApiUrl(this._ssUrl)
     ) {
       try {
         const parsed = JSON.parse(body);
@@ -429,13 +513,27 @@
         for (const node of mutation.addedNodes) {
           if (node.nodeType !== Node.ELEMENT_NODE) continue;
 
+          // Response container selectors for all supported services
+          const RESPONSE_SELECTORS = [
+            // Claude
+            '[data-is-streaming]', '.font-claude-message',
+            // ChatGPT
+            '[data-message-author-role="assistant"]', '.markdown',
+            // Grok
+            '[class*="message-bubble"]', '[class*="response"]',
+            // Gemini
+            '.model-response-text', '.response-content', 'message-content',
+            // Generic
+            '.prose', '[class*="Message"]', '[class*="assistant"]',
+          ].join(', ');
+
           const responseEls = node.querySelectorAll
-            ? node.querySelectorAll('[data-is-streaming], .font-claude-message, .prose, [class*="Message"]')
+            ? node.querySelectorAll(RESPONSE_SELECTORS)
             : [];
 
           for (const el of responseEls) revealInElement(el);
 
-          if (node.matches?.('[data-is-streaming], .font-claude-message, .prose, [class*="Message"]')) {
+          if (node.matches?.(RESPONSE_SELECTORS)) {
             revealInElement(node);
           }
         }

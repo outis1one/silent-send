@@ -88,13 +88,25 @@ const messageHandlers = {
 
   async 'update:settings'(message) {
     await Storage.saveSettings(message.settings);
-    // Broadcast to content scripts
-    const tabs = await api.tabs.query({ url: 'https://claude.ai/*' });
-    for (const tab of tabs) {
-      api.tabs.sendMessage(tab.id, {
-        type: 'settings:updated',
-        settings: message.settings,
-      }).catch(() => {});
+    // Broadcast to content scripts on all supported sites
+    const SUPPORTED_URLS = [
+      'https://claude.ai/*',
+      'https://chatgpt.com/*',
+      'https://chat.openai.com/*',
+      'https://grok.x.ai/*',
+      'https://x.com/i/grok*',
+      'https://gemini.google.com/*',
+      'http://localhost/*',
+      'http://127.0.0.1/*',
+    ];
+    for (const urlPattern of SUPPORTED_URLS) {
+      const tabs = await api.tabs.query({ url: urlPattern }).catch(() => []);
+      for (const tab of tabs) {
+        api.tabs.sendMessage(tab.id, {
+          type: 'settings:updated',
+          settings: message.settings,
+        }).catch(() => {});
+      }
     }
   },
 };

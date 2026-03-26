@@ -1,6 +1,16 @@
 # Silent Send
 
-A browser extension (Chrome + Firefox) that intercepts personal information and substitutes it with user-defined replacements before sending to Claude.ai.
+A browser extension (Chrome + Firefox) that intercepts personal information and substitutes it with user-defined replacements before sending to AI services.
+
+### Supported services
+
+| Service | Domains |
+|---------|---------|
+| Claude | claude.ai, claude.ai/code |
+| ChatGPT | chatgpt.com, chat.openai.com |
+| Grok | grok.x.ai, x.com/i/grok |
+| Gemini | gemini.google.com |
+| OpenWebUI | localhost, 127.0.0.1 (self-hosted) |
 
 ## How it works
 

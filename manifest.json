@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Silent Send",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Intercepts personal info and substitutes it with user-defined replacements before sending to AI services.",
   "permissions": [
     "storage",
@@ -9,7 +9,14 @@
     "scripting"
   ],
   "host_permissions": [
-    "https://claude.ai/*"
+    "https://claude.ai/*",
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "https://grok.x.ai/*",
+    "https://x.com/i/grok*",
+    "https://gemini.google.com/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
   ],
   "background": {
     "service_worker": "src/background/service-worker.js",
@@ -17,7 +24,16 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://claude.ai/*"],
+      "matches": [
+        "https://claude.ai/*",
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://grok.x.ai/*",
+        "https://x.com/i/grok*",
+        "https://gemini.google.com/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
       "js": ["src/content/injector.js"],
       "css": ["src/content/content.css"],
       "run_at": "document_start",
@@ -41,7 +57,16 @@
   "web_accessible_resources": [
     {
       "resources": ["src/content/content.js"],
-      "matches": ["https://claude.ai/*"]
+      "matches": [
+        "https://claude.ai/*",
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://grok.x.ai/*",
+        "https://x.com/*",
+        "https://gemini.google.com/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ]
     }
   ]
 }

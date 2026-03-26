@@ -43,7 +43,36 @@ const SilentSendSync = {
   },
 
   async _saveSyncEncryption(config) {
-    await api.storage.local.set({ ss_sync_encryption: config });
+    // Encrypt the TOTP secret at rest if we have a cached key
+    const toStore = { ...config };
+    if (toStore.totpSecret) {
+      const cached = await SilentSendCrypto.getCachedKey();
+      if (cached) {
+        toStore._totpEncrypted = await SilentSendCrypto.encryptWithKey(
+          { secret: toStore.totpSecret }, cached.key
+        );
+        delete toStore.totpSecret; // don't store plaintext
+      }
+    }
+    await api.storage.local.set({ ss_sync_encryption: toStore });
+  },
+
+  /**
+   * Get the decrypted TOTP secret (if configured and key is available).
+   */
+  async _getTOTPSecret(config) {
+    if (config.totpSecret) return config.totpSecret; // already plaintext (legacy)
+    if (!config._totpEncrypted) return null;
+
+    const cached = await SilentSendCrypto.getCachedKey();
+    if (!cached) return null;
+
+    try {
+      const decrypted = await SilentSendCrypto.decryptWithKey(config._totpEncrypted, cached.key);
+      return decrypted.secret;
+    } catch {
+      return null;
+    }
   },
 
   /**
@@ -150,22 +179,31 @@ const SilentSendSync = {
     const config = await this._getSyncEncryption();
     if (!config?.enabled) return { success: true };
 
-    // Validate TOTP if configured
-    if (config.totpSecret) {
-      if (!totpCode) return { success: false, reason: 'TOTP code required.' };
-      const valid = await SilentSendCrypto.validateTOTP(config.totpSecret, totpCode);
-      if (!valid) return { success: false, reason: 'Invalid TOTP code.' };
-    }
-
-    // Derive key from password using stored salt
+    // Derive key from password first (needed to decrypt TOTP secret)
     const { key, salt } = await SilentSendCrypto.deriveAndReturnKey(password, config.salt);
 
-    // Verify the password is correct by trying to decrypt the verification blob
+    // Verify the password is correct
     if (config.verificationBlob) {
       try {
         await SilentSendCrypto.decryptWithKey(config.verificationBlob, key);
       } catch {
         return { success: false, reason: 'Wrong password.' };
+      }
+    }
+
+    // Validate TOTP if configured (after deriving key, since TOTP secret
+    // may be encrypted at rest and needs the key to decrypt)
+    const hasTOTP = config.totpSecret || config._totpEncrypted;
+    if (hasTOTP) {
+      if (!totpCode) return { success: false, reason: 'TOTP code required.' };
+      // Temporarily cache key so _getTOTPSecret can decrypt
+      await SilentSendCrypto.cacheKey(key, salt, config.ttlDays ?? 90);
+      const secret = await this._getTOTPSecret(config);
+      if (!secret) return { success: false, reason: 'Could not decrypt TOTP secret.' };
+      const valid = await SilentSendCrypto.validateTOTP(secret, totpCode);
+      if (!valid) {
+        await SilentSendCrypto.clearCachedKey(); // don't leave key cached on TOTP failure
+        return { success: false, reason: 'Invalid TOTP code.' };
       }
     }
 
@@ -200,14 +238,18 @@ const SilentSendSync = {
   async reverifyWithTOTP(totpCode) {
     const config = await this._getSyncEncryption();
     if (!config?.enabled) return { success: false, reason: 'Encryption not enabled.' };
-    if (!config.totpSecret) return { success: false, reason: 'TOTP not configured.' };
+
+    const hasTOTP = config.totpSecret || config._totpEncrypted;
+    if (!hasTOTP) return { success: false, reason: 'TOTP not configured.' };
 
     // Must have a cached key — TOTP can't derive one
     const cached = await SilentSendCrypto.getCachedKey();
     if (!cached) return { success: false, reason: 'No cached key. Password required for first setup.' };
 
-    // Validate the TOTP code
-    const valid = await SilentSendCrypto.validateTOTP(config.totpSecret, totpCode);
+    // Decrypt the TOTP secret and validate
+    const secret = await this._getTOTPSecret(config);
+    if (!secret) return { success: false, reason: 'Could not decrypt TOTP secret.' };
+    const valid = await SilentSendCrypto.validateTOTP(secret, totpCode);
     if (!valid) return { success: false, reason: 'Invalid TOTP code.' };
 
     // Reset the TTL timer
@@ -287,18 +329,19 @@ const SilentSendSync = {
       webauthn: enableWebAuthn,
     };
 
+    // Cache the key immediately (needed before _saveSyncEncryption
+    // can encrypt the TOTP secret)
+    await SilentSendCrypto.cacheKey(key, salt, ttlDays);
+
     let totpSecret, totpURI;
     if (enableTOTP) {
       totpSecret = SilentSendCrypto.generateTOTPSecret();
       totpURI = SilentSendCrypto.totpURI(totpSecret);
-      config.totpSecret = totpSecret;
+      config.totpSecret = totpSecret; // _saveSyncEncryption will encrypt this
       if (authMethod === 'password') config.authMethod = 'both';
     }
 
     await this._saveSyncEncryption(config);
-
-    // Cache the key immediately
-    await SilentSendCrypto.cacheKey(key, salt, ttlDays);
 
     // Set up WebAuthn if requested
     if (enableWebAuthn && SilentSendCrypto.isWebAuthnAvailable()) {
@@ -312,6 +355,10 @@ const SilentSendSync = {
       }
     }
 
+    // Encrypt any existing plaintext sensitive data in storage
+    const StorageModule = (await import('./storage.js')).default;
+    await StorageModule.encryptExistingData();
+
     return { success: true, totpSecret, totpURI };
   },
 
@@ -319,6 +366,10 @@ const SilentSendSync = {
    * Disable sync encryption entirely.
    */
   async disableEncryption() {
+    // Decrypt all data back to plaintext before removing encryption config
+    const StorageModule = (await import('./storage.js')).default;
+    await StorageModule.decryptAllData();
+
     await api.storage.local.remove('ss_sync_encryption');
     await SilentSendCrypto.clearCachedKey();
     await SilentSendCrypto.clearWebAuthnCredential();
@@ -379,7 +430,7 @@ const SilentSendSync = {
         authMethod: config.authMethod,
         ttlDays: config.ttlDays,
         webauthn: config.webauthn,
-        totpSecret: config.totpSecret || null,
+        totpSecret: await this._getTOTPSecret(config) || null,
       },
     };
 

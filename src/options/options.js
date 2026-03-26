@@ -1002,7 +1002,8 @@ async function showSyncAuthPrompt(mode = 'decrypt') {
   }
 
   // First-device: show TOTP alongside password if configured
-  if (!isReverify && config?.totpSecret) {
+  const hasTOTP = config?.totpSecret || config?._totpEncrypted;
+  if (!isReverify && hasTOTP) {
     $('#syncAuthTOTPForPassword').style.display = '';
   } else {
     $('#syncAuthTOTPForPassword').style.display = 'none';
@@ -1023,7 +1024,7 @@ async function showSyncAuthPrompt(mode = 'decrypt') {
 
     // TOTP re-verify option
     const totpGroup = $('#totpReverifyGroup');
-    if (config?.totpSecret) {
+    if (hasTOTP) {
       totpGroup.style.display = 'flex';
     } else {
       totpGroup.style.display = 'none';

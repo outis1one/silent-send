@@ -35,6 +35,27 @@
       <button class="tab" data-tab="test">Test</button>
     </nav>
 
+    <!-- Locked State Overlay -->
+    <div id="lockedOverlay" style="display:none">
+      <div style="padding:24px 16px;text-align:center">
+        <div style="font-size:32px;margin-bottom:8px">&#128274;</div>
+        <h2 style="font-size:15px;margin:0 0 6px;color:#1f2937">Silent Send is Locked</h2>
+        <p style="font-size:12px;color:#6b7280;margin:0 0 16px">
+          Your data is encrypted. Enter your password to unlock.
+          <br>Substitutions are <strong>paused</strong> until unlocked.
+        </p>
+        <div style="display:flex;flex-direction:column;gap:8px;max-width:260px;margin:0 auto">
+          <input type="password" id="unlockPassword" placeholder="Encryption password" autocomplete="current-password"
+            style="width:100%;box-sizing:border-box;font-size:13px;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;text-align:center">
+          <input type="text" id="unlockTOTP" placeholder="TOTP code (if enabled)" autocomplete="one-time-code" inputmode="numeric" maxlength="6"
+            style="width:100%;box-sizing:border-box;font-size:13px;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;text-align:center;display:none">
+          <button class="btn btn-primary" id="btnUnlock" style="width:100%;padding:8px;font-size:13px">Unlock</button>
+          <button class="btn" id="btnUnlockBiometric" style="width:100%;padding:8px;font-size:13px;display:none">Unlock with Biometric</button>
+          <div id="unlockStatus" style="font-size:11px;min-height:16px;color:#dc2626"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- First-Run Setup Banner -->
     <div class="first-run-banner" id="firstRunBanner" style="display:none">
       <div class="first-run-icon">!</div>
@@ -175,9 +196,8 @@
     <footer class="footer">
       <div class="privacy-note">
         Your data never leaves your browser. No servers, no tracking, no analytics.
-        Identity data is stored unencrypted in local browser storage — anyone with
-        access to your computer could read it. This is the same as browser cookies
-        and localStorage, not as secure as saved passwords (which are OS-encrypted).
+        <span id="privacyEncNote">When sync encryption is enabled, identity data is
+        AES-256 encrypted at rest — unreadable without your password.</span>
       </div>
       <div class="privacy-note" style="color:#b45309;background:#fef3c7;padding:6px 8px;border-radius:4px;margin-bottom:6px">
         Silent Send is a convenience tool, not a security guarantee. It can miss

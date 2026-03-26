@@ -30,10 +30,10 @@ NEW_VERSION="$MAJOR.$MINOR.$PATCH"
 
 echo "Version: $CURRENT_VERSION → $NEW_VERSION"
 
-# Update all version references
-sed -i "s/\"version\": \"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/" "$MANIFEST"
-sed -i "s/\"version\": \"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/" "$MANIFEST_CHROME"
-sed -i "s/\"version\": \"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/" "$PACKAGE_JSON"
+# Update all version references (only top-level "version", not "manifest_version")
+sed -i "s/^  \"version\": \"$CURRENT_VERSION\"/  \"version\": \"$NEW_VERSION\"/" "$MANIFEST"
+sed -i "s/^  \"version\": \"$CURRENT_VERSION\"/  \"version\": \"$NEW_VERSION\"/" "$MANIFEST_CHROME"
+sed -i "s/^  \"version\": \"$CURRENT_VERSION\"/  \"version\": \"$NEW_VERSION\"/" "$PACKAGE_JSON"
 
 # Commit the version bump
 cd "$SCRIPT_DIR"
@@ -113,7 +113,12 @@ for attempt in $(seq 1 $MAX_ATTEMPTS); do
   PATCH=$((PATCH + 1))
   NEW_VERSION="$MAJOR.$MINOR.$PATCH"
 
-  sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$NEW_VERSION\"/" "$SCRIPT_DIR/dist/firefox/manifest.json"
+  # Only replace the top-level "version" field, not "manifest_version"
+  sed -i "s/^  \"version\": \"[^\"]*\"/  \"version\": \"$NEW_VERSION\"/" "$SCRIPT_DIR/dist/firefox/manifest.json"
+
+  # Wait before retrying to avoid Mozilla rate limiting
+  echo "Waiting 8 seconds before retry..."
+  sleep 8
 done
 
 echo "Error: Failed after $MAX_ATTEMPTS attempts."

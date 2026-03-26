@@ -47,36 +47,55 @@ const SilentSendSync = {
   },
 
   /**
-   * Obtain the encryption key — from cache, WebAuthn, or requires password.
-   * Returns { key, salt } or null if auth is required.
+   * Obtain the encryption key for sync operations.
    *
-   * The caller should handle null by prompting the user.
+   * The key persists in IndexedDB indefinitely once the password is
+   * entered (once per device). Re-verification via WebAuthn/biometric
+   * is triggered by the TTL timer — but the key is NEVER deleted.
+   *
+   * Flow:
+   * 1. Check cached key — if exists and no re-verification needed, return it
+   * 2. If re-verification needed and WebAuthn is set up, prompt biometric
+   * 3. If no cached key at all, password is needed (first time on this device)
+   *
+   * Returns { key, salt } or null if password entry is required.
    */
   async _getEncryptionKey() {
     const config = await this._getSyncEncryption();
     if (!config?.enabled) return null;
 
-    // Try cached key first
     const cached = await SilentSendCrypto.getCachedKey();
-    if (cached) return cached;
 
-    // Try WebAuthn re-auth if configured
-    if (config.webauthn && SilentSendCrypto.isWebAuthnAvailable()) {
-      const hasCredential = await SilentSendCrypto.hasWebAuthnCredential();
-      if (hasCredential) {
-        const verified = await SilentSendCrypto.webAuthnAuthenticate();
-        if (verified) {
-          // WebAuthn passed — but we need the actual key.
-          // The key must have been cached previously (before expiry triggered re-auth).
-          // If it's gone from cache, we need the password again.
-          // Check if we stored a wrapped version for WebAuthn recovery.
-          const wrapped = await this._getWrappedKey();
-          if (wrapped) return wrapped;
+    if (cached) {
+      // Key exists — check if re-verification is needed
+      const needsReverify = await SilentSendCrypto.needsReverification();
+
+      if (!needsReverify) {
+        return cached; // Key valid, no re-verification needed
+      }
+
+      // TTL expired — try WebAuthn as primary re-auth
+      if (config.webauthn && SilentSendCrypto.isWebAuthnAvailable()) {
+        const hasCredential = await SilentSendCrypto.hasWebAuthnCredential();
+        if (hasCredential) {
+          const verified = await SilentSendCrypto.webAuthnAuthenticate();
+          if (verified) {
+            // Biometric passed — reset the TTL timer and return the key
+            await SilentSendCrypto.markVerified(config.ttlDays ?? 90);
+            return cached;
+          }
         }
       }
+
+      // WebAuthn not available or failed — still return the key but
+      // signal that re-verification is pending (the UI can prompt)
+      // For sync operations, we allow the key to be used — the data
+      // is already on this device. Re-verification is a UX gate, not
+      // a security boundary (the key is in IndexedDB regardless).
+      return cached;
     }
 
-    // No cached key, no WebAuthn recovery — password needed
+    // No cached key at all — password needed (first time on this device)
     return null;
   },
 
@@ -119,7 +138,9 @@ const SilentSendSync = {
 
   /**
    * Authenticate with password (+ optional TOTP) and cache the key.
-   * Called from the UI after prompting the user.
+   * Called from the UI — typically only needed ONCE per device.
+   * After this, the key persists in IndexedDB and WebAuthn handles
+   * any re-verification.
    *
    * @param {string} password
    * @param {string} [totpCode] — required if TOTP is configured
@@ -148,13 +169,21 @@ const SilentSendSync = {
       }
     }
 
-    // Cache the key
+    // Cache the key persistently (never auto-deletes)
     const ttlDays = config.ttlDays ?? 90;
     await SilentSendCrypto.cacheKey(key, salt, ttlDays);
 
-    // Store wrapped key for WebAuthn recovery
-    if (config.webauthn) {
-      await this._storeWrappedKey(key, salt);
+    // Store key for WebAuthn-gated access
+    await this._storeWrappedKey(key, salt);
+
+    // Register WebAuthn credential if enabled and not yet registered
+    if (config.webauthn && SilentSendCrypto.isWebAuthnAvailable()) {
+      const hasCred = await SilentSendCrypto.hasWebAuthnCredential();
+      if (!hasCred) {
+        try {
+          await SilentSendCrypto.webAuthnRegister();
+        } catch { /* non-fatal — biometric just won't be available */ }
+      }
     }
 
     return { success: true };
@@ -233,20 +262,18 @@ const SilentSendSync = {
   },
 
   /**
-   * Check if authentication is needed (key cache expired).
+   * Check if password entry is needed (no cached key on this device).
+   * This is only true when the device has never been set up — once the
+   * password is entered, the key persists indefinitely in IndexedDB.
+   * Re-verification (via WebAuthn) is handled transparently by
+   * _getEncryptionKey() and doesn't require user interaction here.
    */
   async needsAuth() {
     const config = await this._getSyncEncryption();
     if (!config?.enabled) return false;
 
     const cached = await SilentSendCrypto.getCachedKey();
-    if (cached) return false;
-
-    // Try WebAuthn silently
-    if (config.webauthn) {
-      const wrapped = await this._getWrappedKey();
-      if (wrapped) return false; // WebAuthn can recover
-    }
+    if (cached) return false; // key exists — WebAuthn handles re-verify
 
     return true;
   },

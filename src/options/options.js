@@ -890,24 +890,18 @@ async function initSyncEncryptionUI() {
     }
   });
 
-  // Auth prompt — Biometric button
+  // Auth prompt — Biometric button (primary re-auth after first password entry)
   $('#btnSyncAuthBiometric').addEventListener('click', async () => {
     setSyncAuthStatus('Waiting for biometric...', 'neutral');
     const verified = await SilentSendCrypto.webAuthnAuthenticate();
     if (verified) {
-      // Try to recover wrapped key
-      const wrapped = await SilentSendSync._getWrappedKey();
-      if (wrapped) {
-        const config = await SilentSendSync._getSyncEncryption();
-        const ttlDays = config?.ttlDays ?? 90;
-        await SilentSendCrypto.cacheKey(wrapped.key, wrapped.salt, ttlDays);
-        $('#syncAuthPrompt').style.display = 'none';
-        setSyncEncStatus('Authenticated via biometric. Sync data unlocked.', 'ok');
-      } else {
-        setSyncAuthStatus('Biometric verified but key not found. Enter password.', 'warn');
-      }
+      const config = await SilentSendSync._getSyncEncryption();
+      const ttlDays = config?.ttlDays ?? 90;
+      await SilentSendCrypto.markVerified(ttlDays);
+      $('#syncAuthPrompt').style.display = 'none';
+      setSyncEncStatus('Verified via biometric.', 'ok');
     } else {
-      setSyncAuthStatus('Biometric verification failed.', 'error');
+      setSyncAuthStatus('Biometric failed. Use password instead.', 'error');
     }
   });
 }
@@ -923,20 +917,20 @@ async function showEncryptionConfigured() {
     else if (config.authMethod === 'totp') parts.push('TOTP');
     else parts.push('Password');
 
-    if (config.webauthn) parts.push('Biometric');
+    if (config.webauthn) parts.push('Biometric re-auth');
 
-    const ttl = config.ttlDays === -1 ? 'never re-auth'
-      : config.ttlDays === 0 ? 'each session'
-      : `every ${config.ttlDays}d`;
+    const ttl = config.ttlDays === -1 ? 'never re-verify'
+      : config.ttlDays === 0 ? 're-verify each session'
+      : `re-verify every ${config.ttlDays}d`;
     parts.push(ttl);
 
     $('#encryptionInfo').textContent = `(${parts.join(' · ')})`;
   }
 
-  // Check if auth is currently needed
+  // Check if password entry is needed (first time on this device)
   const needsAuth = await SilentSendSync.needsAuth();
   if (needsAuth) {
-    showSyncAuthPrompt();
+    showSyncAuthPrompt('first-device');
   }
 }
 
@@ -947,9 +941,24 @@ function showEncryptionNotConfigured() {
   $('#totpSetupResult').style.display = 'none';
 }
 
-async function showSyncAuthPrompt() {
+/**
+ * Show the auth prompt.
+ * @param {'first-device'|'reverify'|'decrypt'} mode
+ */
+async function showSyncAuthPrompt(mode = 'decrypt') {
   const config = await SilentSendSync._getSyncEncryption();
-  $('#syncAuthPrompt').style.display = 'block';
+  const promptEl = $('#syncAuthPrompt');
+  promptEl.style.display = 'block';
+
+  // Adjust header message based on context
+  const headerEl = promptEl.querySelector('p');
+  if (mode === 'first-device') {
+    headerEl.textContent = 'First time on this device — enter your sync encryption password';
+  } else if (mode === 'reverify') {
+    headerEl.textContent = 'Re-verification required — use biometric or enter password';
+  } else {
+    headerEl.textContent = 'Authentication required — encrypted sync data needs decryption';
+  }
 
   // Show TOTP field if needed
   if (config?.totpSecret) {
@@ -958,8 +967,9 @@ async function showSyncAuthPrompt() {
     $('#syncAuthTOTP').style.display = 'none';
   }
 
-  // Show biometric button if available
-  if (config?.webauthn && SilentSendCrypto.isWebAuthnAvailable()) {
+  // Show biometric button — available unless this is first-device setup
+  // (no WebAuthn credential exists yet on a new device)
+  if (mode !== 'first-device' && config?.webauthn && SilentSendCrypto.isWebAuthnAvailable()) {
     const hasCred = await SilentSendCrypto.hasWebAuthnCredential();
     $('#btnSyncAuthBiometric').style.display = hasCred ? '' : 'none';
   } else {

@@ -8,7 +8,13 @@
 
 import Storage from '../lib/storage.js';
 import SilentSendSync from '../lib/sync.js';
+import OrgPolicy from '../lib/org-policy.js';
+import TamperGuard from '../lib/tamper-guard.js';
 import api from '../lib/browser-polyfill.js';
+
+// --- Alarm names ---
+const AUTO_SYNC_ALARM = 'ss-auto-sync';
+const ORG_POLICY_ALARM = 'ss-org-policy';
 
 // Track substitution counts per tab
 const tabCounts = new Map();
@@ -398,11 +404,84 @@ api.notifications.onClicked.addListener((notificationId) => {
   }
 });
 
+// --- Alarms — background polling (MV3-safe, survives service worker restarts) ---
+
+async function setupAutoSyncAlarm() {
+  const config = await SilentSendSync.getAutoSyncConfig();
+  if (config?.enabled) {
+    api.alarms.create(AUTO_SYNC_ALARM, {
+      periodInMinutes: config.interval || 15,
+    });
+  } else {
+    api.alarms.clear(AUTO_SYNC_ALARM).catch(() => {});
+  }
+}
+
+async function setupOrgPolicyAlarm() {
+  const inOrg = await OrgPolicy.isInOrg();
+  if (inOrg) {
+    api.alarms.create(ORG_POLICY_ALARM, { periodInMinutes: 60 });
+  } else {
+    api.alarms.clear(ORG_POLICY_ALARM).catch(() => {});
+  }
+}
+
+api.alarms.onAlarm.addListener(async (alarm) => {
+  // Skip if locked
+  const locked = await Storage.isLocked();
+  if (locked) return;
+
+  if (alarm.name === AUTO_SYNC_ALARM) {
+    const result = await SilentSendSync.performAutoSync();
+    if (result.pulled) {
+      console.log('[Silent Send] Auto-sync pulled new data');
+    }
+    if (result.error) {
+      console.warn('[Silent Send] Auto-sync error:', result.error);
+    }
+  }
+
+  if (alarm.name === ORG_POLICY_ALARM) {
+    const result = await OrgPolicy.fetchPolicy();
+    if (result.updated) {
+      console.log('[Silent Send] Org policy updated to version', result.version);
+      // Notify content scripts of potential new mappings
+      broadcastSettings(await Storage.getSettings());
+    }
+  }
+});
+
+// --- Tamper guard message handlers ---
+const tamperHandlers = {
+  async 'tamper:check-action'(message, _sender, sendResponse) {
+    const result = await TamperGuard.requireAuth(message.action, message.adminPassword);
+    sendResponse(result);
+  },
+
+  async 'tamper:is-enabled'(_message, _sender, sendResponse) {
+    const enabled = await TamperGuard.isEnabled();
+    sendResponse({ enabled });
+  },
+};
+
+// Add tamper handlers to main message handler
+const origHandler = api.runtime.onMessage._listeners?.[0];
+api.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const handler = tamperHandlers[message.type];
+  if (handler) {
+    handler(message, sender, sendResponse);
+    return true;
+  }
+});
+
 // --- Set initial state ---
 api.runtime.onInstalled.addListener(async () => {
   api.action.setBadgeBackgroundColor({ color: '#6b7280' });
   const settings = await Storage.getSettings();
   await updateIcon(settings);
+  // Set up alarms on install
+  await setupAutoSyncAlarm();
+  await setupOrgPolicyAlarm();
 });
 
 // Also set icon on startup (service worker wake) + pull any newer sync data
@@ -428,4 +507,8 @@ api.runtime.onInstalled.addListener(async () => {
   if (settings.browserSync) {
     await SilentSendSync.pullFromSyncStorage();
   }
+
+  // Set up periodic alarms
+  await setupAutoSyncAlarm();
+  await setupOrgPolicyAlarm();
 })();

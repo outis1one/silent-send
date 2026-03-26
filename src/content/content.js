@@ -186,15 +186,22 @@
       }
     }
 
-    // Usernames + paths
+    // Usernames + hostnames + paths
     if (id.enabled.usernames !== false) {
+      const hostMap = new Map();
+      for (const h of (id.hostnames || [])) {
+        if (h.real && h.substitute) hostMap.set(h.real.toLowerCase(), h);
+      }
+
       for (const u of (id.usernames || [])) {
         if (!u.real || !u.substitute) continue;
 
-        // user@hostname
+        // user@hostname (substitute both username and hostname if configured)
         result = result.replace(new RegExp(esc(u.real) + '@[a-zA-Z0-9._\\-]+', 'g'), (matched) => {
           const host = matched.slice(u.real.length + 1);
-          const sub = u.substitute + '@' + host;
+          const hostEntry = hostMap.get(host.toLowerCase());
+          const subHost = hostEntry ? hostEntry.substitute : host;
+          const sub = u.substitute + '@' + subHost;
           replacements.push({ original: matched, replaced: sub, category: 'username', pattern: 'smart' });
           return sub;
         });
@@ -225,6 +232,16 @@
           result = result.replace(new RegExp('\\b' + esc(u.real) + '\\b', 'g'), (matched) => {
             replacements.push({ original: matched, replaced: u.substitute, category: 'username', pattern: 'smart' });
             return u.substitute;
+          });
+        }
+      }
+
+      // Standalone hostname substitution
+      for (const [, h] of hostMap) {
+        if (h.real.length >= 3) {
+          result = result.replace(new RegExp('\\b' + esc(h.real) + '\\b', 'gi'), (matched) => {
+            replacements.push({ original: matched, replaced: h.substitute, category: 'hostname', pattern: 'smart' });
+            return h.substitute;
           });
         }
       }

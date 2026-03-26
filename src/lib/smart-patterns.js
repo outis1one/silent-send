@@ -222,13 +222,17 @@ const SmartPatterns = {
     return { text: result, replacements };
   },
 
-  // ----- Usernames -----
+  // ----- Usernames + Hostnames -----
   // Catches: user@hostname, ~username, /home/username, mentions of username
-  // in shell/code contexts
+  // in shell/code contexts. Also substitutes hostnames independently.
   _substituteUsernames(text, identity) {
     const replacements = [];
     let result = text;
     const usernames = identity.usernames || [];
+    const hostMap = new Map();
+    for (const h of (identity.hostnames || [])) {
+      if (h.real && h.substitute) hostMap.set(h.real.toLowerCase(), h);
+    }
 
     for (const u of usernames) {
       if (!u.real || !u.substitute) continue;
@@ -240,7 +244,10 @@ const SmartPatterns = {
       );
       result = result.replace(userHostRegex, (matched) => {
         const host = matched.slice(u.real.length + 1);
-        const sub = u.substitute + '@' + host;
+        // Also substitute hostname if configured
+        const hostEntry = hostMap.get(host.toLowerCase());
+        const subHost = hostEntry ? hostEntry.substitute : host;
+        const sub = u.substitute + '@' + subHost;
         replacements.push({
           original: matched,
           replaced: sub,
@@ -275,6 +282,22 @@ const SmartPatterns = {
             pattern: 'smart-username',
           });
           return u.substitute;
+        });
+      }
+    }
+
+    // Standalone hostname substitution (catches hostnames appearing on their own)
+    for (const [, h] of hostMap) {
+      if (h.real.length >= 3) {
+        const hostRegex = new RegExp('\\b' + esc(h.real) + '\\b', 'gi');
+        result = result.replace(hostRegex, (matched) => {
+          replacements.push({
+            original: matched,
+            replaced: h.substitute,
+            category: 'hostname',
+            pattern: 'smart-hostname',
+          });
+          return h.substitute;
         });
       }
     }

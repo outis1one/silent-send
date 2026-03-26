@@ -111,6 +111,11 @@ function loadIdentityForm() {
     $('#idUserReal').value = user.real || '';
     $('#idUserSub').value = user.substitute || '';
   }
+  const host = (identity.hostnames || [])[0];
+  if (host) {
+    $('#idHostReal').value = host.real || '';
+    $('#idHostSub').value = host.substitute || '';
+  }
   if (phone) {
     $('#idPhoneReal').value = phone.real || '';
     $('#idPhoneSub').value = phone.substitute || '';
@@ -144,6 +149,13 @@ async function saveIdentity() {
     usernames.push({ real: userReal, substitute: userSub });
   }
 
+  const hostnames = [];
+  const hostReal = $('#idHostReal').value.trim();
+  const hostSub = $('#idHostSub').value.trim();
+  if (hostReal && hostSub) {
+    hostnames.push({ real: hostReal, substitute: hostSub });
+  }
+
   const phones = [];
   const phoneReal = $('#idPhoneReal').value.trim();
   const phoneSub = $('#idPhoneSub').value.trim();
@@ -155,6 +167,7 @@ async function saveIdentity() {
     names,
     emails,
     usernames,
+    hostnames,
     phones,
     catchAllEmail: $('#idCatchAllEmail').value.trim(),
     emailDomains: identity.emailDomains || [],

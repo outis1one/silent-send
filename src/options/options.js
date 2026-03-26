@@ -1,4 +1,5 @@
 import Storage from '../lib/storage.js';
+import SilentSendCrypto from '../lib/crypto.js';
 import api from '../lib/browser-polyfill.js';
 
 let mappings = [];
@@ -13,11 +14,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Apply settings to UI
   $('#showHighlights').checked = settings.showHighlights || false;
   $('#secretScanning').checked = settings.secretScanning !== false;
+  $('#autoDetect').checked = settings.autoDetect !== false;
+  $('#autoRedactDetected').checked = settings.autoRedactDetected !== false;
+  $('#autoAddDetected').checked = settings.autoAddDetected !== false;
   $('#maxLogEntries').value = settings.maxLogEntries || 200;
 
   renderMappings();
   renderDomains();
   renderLog();
+
+  // Transfer data
+  $('#btnExportAll').addEventListener('click', exportAllPlain);
+  $('#btnExportEncrypted').addEventListener('click', exportAllEncrypted);
+  $('#btnImportAll').addEventListener('click', () => $('#fileImportAll').click());
+  $('#fileImportAll').addEventListener('change', importAll);
 
   // Custom domains
   $('#btnAddDomain').addEventListener('click', addDomain);
@@ -32,6 +42,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   $('#secretScanning').addEventListener('change', async (e) => {
     await Storage.saveSettings({ secretScanning: e.target.checked });
+  });
+
+  $('#autoDetect').addEventListener('change', async (e) => {
+    await Storage.saveSettings({ autoDetect: e.target.checked });
+  });
+
+  $('#autoRedactDetected').addEventListener('change', async (e) => {
+    await Storage.saveSettings({ autoRedactDetected: e.target.checked });
+  });
+
+  $('#autoAddDetected').addEventListener('change', async (e) => {
+    await Storage.saveSettings({ autoAddDetected: e.target.checked });
   });
 
   $('#maxLogEntries').addEventListener('change', async (e) => {
@@ -269,6 +291,106 @@ function renderDomains() {
       renderDomains();
     });
   });
+}
+
+// --- Transfer Data (Export/Import All) ---
+
+async function getAllData() {
+  const result = await api.storage.local.get(null); // get everything
+  return {
+    version: '1',
+    exportedAt: new Date().toISOString(),
+    identity: result.ss_identity || {},
+    mappings: result.ss_mappings || [],
+    settings: result.ss_settings || {},
+  };
+}
+
+function downloadFile(content, filename) {
+  const blob = new Blob([content], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function exportAllPlain() {
+  const data = await getAllData();
+  downloadFile(JSON.stringify(data, null, 2), 'silent-send-backup.json');
+}
+
+async function exportAllEncrypted() {
+  const password = prompt('Set a password for this backup:');
+  if (!password) return;
+  const confirm = prompt('Confirm password:');
+  if (password !== confirm) {
+    alert('Passwords do not match.');
+    return;
+  }
+
+  const data = await getAllData();
+  try {
+    const encrypted = await SilentSendCrypto.encrypt(data, password);
+    const wrapper = JSON.stringify({ encrypted: true, data: encrypted });
+    downloadFile(wrapper, 'silent-send-backup.ssbackup');
+    alert('Encrypted backup saved. You will need the password to import it.');
+  } catch (e) {
+    alert('Encryption failed: ' + e.message);
+  }
+}
+
+async function importAll(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  try {
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+    let data;
+
+    if (parsed.encrypted) {
+      // Encrypted backup
+      const password = prompt('Enter the password for this backup:');
+      if (!password) return;
+      try {
+        data = await SilentSendCrypto.decrypt(parsed.data, password);
+      } catch (err) {
+        alert('Wrong password or corrupted file.');
+        return;
+      }
+    } else {
+      // Plain backup
+      data = parsed;
+    }
+
+    if (!data.version) {
+      alert('Not a valid Silent Send backup file.');
+      return;
+    }
+
+    if (!confirm('This will replace all your current data. Continue?')) return;
+
+    // Restore
+    if (data.identity) await api.storage.local.set({ ss_identity: data.identity });
+    if (data.mappings) await api.storage.local.set({ ss_mappings: data.mappings });
+    if (data.settings) await api.storage.local.set({ ss_settings: data.settings });
+
+    // Refresh UI
+    mappings = await Storage.getMappings();
+    settings = await Storage.getSettings();
+    renderMappings();
+    renderDomains();
+    renderLog();
+
+    alert('Import complete. Reload the extension for changes to take effect.');
+  } catch (err) {
+    alert('Failed to import: ' + err.message);
+  }
+
+  // Reset file input
+  e.target.value = '';
 }
 
 function escapeHtml(str) {

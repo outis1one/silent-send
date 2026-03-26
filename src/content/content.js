@@ -254,6 +254,7 @@
 
   // ============================================================
   // Combined substitution: smart patterns + explicit + secret scan
+  // + auto-detect warning for unconfigured PPI
   // ============================================================
   function substituteAll(text) {
     const allReplacements = [];
@@ -267,21 +268,162 @@
     allReplacements.push(...explicit.replacements);
 
     // 3. Secret scanner (API keys, tokens, SSNs, credit cards, etc.)
+    let finalText = explicit.text;
     if (settings.secretScanning !== false) {
-      const secrets = scanAndRedactSecrets(explicit.text);
+      const secrets = scanAndRedactSecrets(finalText);
       allReplacements.push(...secrets.redactions);
-      return {
-        text: secrets.text,
-        replacements: allReplacements,
-        modified: allReplacements.length > 0,
-      };
+      finalText = secrets.text;
+    }
+
+    // 4. Auto-detect: scan the FINAL text for unconfigured PPI
+    //    Auto-redact if enabled, otherwise just warn
+    if (settings.autoDetect !== false) {
+      const warnings = autoDetectPPI(finalText, identity);
+      if (warnings.length > 0) {
+        // Auto-redact detected PPI in the outbound text
+        if (settings.autoRedactDetected !== false) {
+          for (let i = warnings.length - 1; i >= 0; i--) {
+            const w = warnings[i];
+            const fake = generateFake(w.name, w.value);
+            const escaped = esc(w.value);
+            const regex = new RegExp(escaped, 'g');
+            finalText = finalText.replace(regex, fake);
+            allReplacements.push({
+              original: w.value,
+              replaced: fake,
+              category: 'auto-detect',
+              pattern: w.name,
+            });
+          }
+        }
+        // Still show the warning so user knows what was caught
+        showAutoDetectWarning(warnings);
+      }
     }
 
     return {
-      text: explicit.text,
+      text: finalText,
       replacements: allReplacements,
       modified: allReplacements.length > 0,
     };
+  }
+
+  // ============================================================
+  // Auto-Detect PPI Scanner (inline for page world)
+  // ============================================================
+  const PPI_PATTERNS = [
+    // Network
+    { name: 'Private IP', re: /\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})\b/g,
+      hint: 'Private IP address', cat: 'network' },
+    { name: 'Public IP', re: /\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b/g,
+      hint: 'IP address — could identify your network', cat: 'network',
+      skip: /^(?:127\.0\.0\.1|0\.0\.0\.0|255\.255\.255\.\d+|8\.8\.[84]\.[84]|1\.1\.1\.1)$/ },
+    { name: 'MAC Address', re: /\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b/g,
+      hint: 'MAC address — identifies hardware', cat: 'network' },
+    // Location
+    { name: 'Street Address', re: /\b\d{1,5}\s+(?:[A-Z][a-z]+\s+){1,3}(?:St|Street|Ave|Avenue|Blvd|Boulevard|Dr|Drive|Ln|Lane|Rd|Road|Way|Ct|Court|Pl|Place)\.?\b/gi,
+      hint: 'Street address', cat: 'address' },
+    { name: 'GPS Coordinates', re: /\b-?\d{1,3}\.\d{4,},\s*-?\d{1,3}\.\d{4,}\b/g,
+      hint: 'GPS coordinates — pinpoints a location', cat: 'address' },
+    // Personal
+    { name: 'Date (possible DOB)', re: /\b(?:(?:0[1-9]|1[0-2])[-/](?:0[1-9]|[12]\d|3[01])[-/](?:19|20)\d{2}|(?:19|20)\d{2}[-/](?:0[1-9]|1[0-2])[-/](?:0[1-9]|[12]\d|3[01]))\b/g,
+      hint: 'Date — could be a birthday', cat: 'personal' },
+    { name: 'EIN / Tax ID', re: /\b\d{2}-\d{7}\b/g,
+      hint: 'Could be a tax ID', cat: 'document' },
+    // Paths not caught by smart patterns
+    { name: 'Home Path', re: /(?:\/home\/|\/Users\/|C:\\Users\\)[a-zA-Z0-9._-]+/g,
+      hint: 'Home directory — reveals username', cat: 'path' },
+    // Shell prompts
+    { name: 'Shell Prompt', re: /[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+[:\$#%>]\s/g,
+      hint: 'Shell prompt — reveals user@host', cat: 'prompt' },
+    // Git remotes
+    { name: 'Git Remote', re: /(?:git@|https:\/\/)(?:github|gitlab|bitbucket)\.[a-z]+[:/][^\s]+/gi,
+      hint: 'Git remote — may reveal username/org', cat: 'url' },
+    // Env vars
+    { name: 'Env Variable', re: /\b(?:HOME|USER|USERNAME|LOGNAME|HOSTNAME|COMPUTERNAME|EMAIL)=[^\s]+/gi,
+      hint: 'Env variable with personal data', cat: 'env' },
+  ];
+
+  function autoDetectPPI(text, ident) {
+    if (!text || text.length < 5) return [];
+
+    // Build skip set from configured values
+    const configured = new Set();
+    if (ident) {
+      const addAll = (arr, key) => (arr || []).forEach(item => {
+        if (item.real) configured.add(item.real.toLowerCase());
+        if (item.substitute) configured.add(item.substitute.toLowerCase());
+      });
+      addAll(ident.names); addAll(ident.emails);
+      addAll(ident.usernames); addAll(ident.hostnames); addAll(ident.phones);
+    }
+
+    const findings = [];
+    for (const pat of PPI_PATTERNS) {
+      pat.re.lastIndex = 0;
+      let m;
+      while ((m = pat.re.exec(text)) !== null) {
+        const val = m[0];
+        if (configured.has(val.toLowerCase())) continue;
+        if (pat.skip && pat.skip.test(val)) continue;
+        findings.push({ name: pat.name, value: val, hint: pat.hint, category: pat.cat });
+      }
+    }
+
+    // Deduplicate by value
+    const seen = new Set();
+    return findings.filter(f => {
+      if (seen.has(f.value)) return false;
+      seen.add(f.value);
+      return true;
+    });
+  }
+
+  // ============================================================
+  // Auto-Detect Warning UI — floating banner
+  // ============================================================
+  let warningEl = null;
+  let warningTimeout = null;
+
+  function showAutoDetectWarning(warnings) {
+    if (!warningEl) {
+      warningEl = document.createElement('div');
+      warningEl.className = 'ss-autodetect-warning';
+      document.body.appendChild(warningEl);
+    }
+
+    const items = warnings.slice(0, 5).map(w =>
+      `<div class="ss-ad-item">
+        <span class="ss-ad-type">${w.name}</span>
+        <code class="ss-ad-value">${w.value.length > 30 ? w.value.slice(0, 27) + '...' : w.value}</code>
+        <span class="ss-ad-hint">${w.hint}</span>
+      </div>`
+    ).join('');
+
+    const more = warnings.length > 5 ? `<div class="ss-ad-more">+${warnings.length - 5} more</div>` : '';
+
+    warningEl.innerHTML = `
+      <div class="ss-ad-header">
+        <strong>Silent Send detected potential PPI that may not be substituted:</strong>
+        <button class="ss-ad-close">&times;</button>
+      </div>
+      ${items}
+      ${more}
+      <div class="ss-ad-footer">These were sent as-is. Consider adding them to your identity or mappings.</div>
+    `;
+
+    warningEl.classList.add('visible');
+
+    // Close button
+    warningEl.querySelector('.ss-ad-close').addEventListener('click', () => {
+      warningEl.classList.remove('visible');
+    });
+
+    // Auto-dismiss after 15 seconds
+    if (warningTimeout) clearTimeout(warningTimeout);
+    warningTimeout = setTimeout(() => {
+      warningEl.classList.remove('visible');
+    }, 15000);
   }
 
   // ============================================================
@@ -566,27 +708,41 @@
   };
 
   // ============================================================
-  // Response Reveal — swaps fake data back to real in the page
+  // Highlighting — CSS Custom Highlight API (zero DOM changes)
+  //
+  // Two highlight modes:
+  //   ss-substituted (yellow) — fake values the AI received
+  //   ss-revealed (terminal: dark bg, green text) — your real data
+  //
+  // Falls back to simple text replacement for reveal if
+  // CSS.highlights is not supported.
   // ============================================================
 
-  // Build reverse mapping pairs from identity + explicit mappings
+  const hasHighlightAPI = typeof CSS !== 'undefined' && CSS.highlights;
+
+  // Register highlight groups
+  let hlSubstituted = null;  // yellow — marks fake values in responses
+  let hlRevealed = null;     // terminal — marks revealed real values
+
+  if (hasHighlightAPI) {
+    hlSubstituted = new Highlight();
+    hlRevealed = new Highlight();
+    CSS.highlights.set('ss-substituted', hlSubstituted);
+    CSS.highlights.set('ss-revealed', hlRevealed);
+  }
+
+  // Build pairs: substitute → real
   function buildRevealPairs() {
     const pairs = [];
 
-    // Explicit mappings (substitute → real)
     for (const m of mappings) {
       if (!m.enabled || !m.substitute || !m.real) continue;
       pairs.push({ from: m.substitute, to: m.real, caseSensitive: m.caseSensitive });
     }
 
-    // Smart identity pairs (substitute → real)
     if (identity) {
       for (const e of (identity.emails || [])) {
         if (e.substitute && e.real) pairs.push({ from: e.substitute, to: e.real });
-      }
-      if (identity.catchAllEmail) {
-        // Can't reverse a catch-all to a specific email, but we mark it
-        // so the user sees it was a substitution
       }
       for (const n of (identity.names || [])) {
         if (n.substitute && n.real) pairs.push({ from: n.substitute, to: n.real });
@@ -602,20 +758,25 @@
       }
     }
 
-    // Sort longer matches first
     pairs.sort((a, b) => b.from.length - a.from.length);
     return pairs;
   }
 
-  // Cache reveal pairs — rebuild when config changes
+  // Cache
   let _revealPairsCache = null;
   window.addEventListener('message', (event) => {
     if (event.data?.type === 'ss:config-updated') _revealPairsCache = null;
   });
 
-  function revealText(text) {
+  function getRevealPairs() {
     if (!_revealPairsCache) _revealPairsCache = buildRevealPairs();
-    const pairs = _revealPairsCache;
+    return _revealPairsCache;
+  }
+
+  // --- Text replacement for reveal (needed regardless of highlight API) ---
+
+  function revealText(text) {
+    const pairs = getRevealPairs();
     let result = text;
     for (const p of pairs) {
       const escaped = esc(p.from);
@@ -625,12 +786,10 @@
     return result;
   }
 
-  // Store originals so we can un-reveal when toggled off
   const originalTexts = new WeakMap();
 
   function revealInElement(el) {
     if (SKIP_REVEAL_TAGS.has(el.tagName)) return;
-    // Skip our own badge
     if (el.classList?.contains('ss-reveal-badge')) return;
 
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
@@ -671,64 +830,139 @@
     }
   }
 
+  // --- CSS Highlight API — find and highlight matching text ---
+
+  function highlightMatches(root) {
+    if (!hasHighlightAPI) return;
+
+    // Clear previous ranges
+    hlSubstituted.clear();
+    hlRevealed.clear();
+
+    const pairs = getRevealPairs();
+    if (pairs.length === 0) return;
+
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const parent = node.parentElement;
+        if (parent && SKIP_REVEAL_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
+        if (parent?.classList?.contains('ss-reveal-badge')) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+
+    let textNode;
+    while ((textNode = walker.nextNode())) {
+      const text = textNode.textContent;
+      if (!text || text.length < MIN_STRING_LENGTH) continue;
+
+      for (const p of pairs) {
+        const escaped = esc(settings.revealMode ? p.to : p.from);
+        const searchTerm = settings.revealMode ? p.to : p.from;
+        const regex = new RegExp(escaped, p.caseSensitive ? 'g' : 'gi');
+        let match;
+
+        while ((match = regex.exec(text)) !== null) {
+          try {
+            const range = new Range();
+            range.setStart(textNode, match.index);
+            range.setEnd(textNode, match.index + match[0].length);
+
+            if (settings.revealMode) {
+              hlRevealed.add(range);
+            } else {
+              hlSubstituted.add(range);
+            }
+          } catch (e) {
+            // Range may be invalid if DOM changed
+          }
+        }
+      }
+    }
+  }
+
   // Elements to skip when revealing (inputs, scripts, styles, extension UI)
   const SKIP_REVEAL_TAGS = new Set([
     'SCRIPT', 'STYLE', 'NOSCRIPT', 'IFRAME', 'INPUT', 'TEXTAREA', 'SELECT',
   ]);
 
-  // Reveal ALL text on the page (not just specific selectors)
+  // Reveal ALL text on the page + apply highlights
   function revealAllResponses() {
     revealInElement(document.body);
+    highlightMatches(document.body);
   }
 
-  // Un-reveal ALL text on the page
+  // Un-reveal ALL text + clear highlights
   function unrevealAllResponses() {
     unrevealInElement(document.body);
+    // In non-reveal mode, highlight the fake values instead
+    highlightMatches(document.body);
+  }
+
+  // Debounced highlight refresh
+  let _highlightTimer = null;
+  function scheduleHighlightRefresh() {
+    if (!hasHighlightAPI) return;
+    if (_highlightTimer) clearTimeout(_highlightTimer);
+    _highlightTimer = setTimeout(() => {
+      highlightMatches(document.body);
+    }, 500);
   }
 
   // Watch for ANY new content on the page
   function observeResponses() {
     const observer = new MutationObserver((mutations) => {
-      if (!settings.revealMode || !hasSubstitutions()) return;
+      if (!hasSubstitutions()) return;
+
+      // Always schedule highlight refresh for new content (yellow markers)
+      let hasNewContent = false;
 
       for (const mutation of mutations) {
-        // Handle new nodes — reveal all text in them
         for (const node of mutation.addedNodes) {
-          if (node.nodeType === Node.ELEMENT_NODE) {
-            if (!SKIP_REVEAL_TAGS.has(node.tagName)) {
-              revealInElement(node);
-            }
-          } else if (node.nodeType === Node.TEXT_NODE) {
-            const text = node.textContent;
-            if (text && text.length >= MIN_STRING_LENGTH) {
-              if (!originalTexts.has(node)) {
-                originalTexts.set(node, text);
+          hasNewContent = true;
+          // Only do text replacement in reveal mode
+          if (settings.revealMode) {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+              if (!SKIP_REVEAL_TAGS.has(node.tagName)) {
+                revealInElement(node);
               }
-              const revealed = revealText(text);
-              if (revealed !== text) {
-                node.textContent = revealed;
+            } else if (node.nodeType === Node.TEXT_NODE) {
+              const text = node.textContent;
+              if (text && text.length >= MIN_STRING_LENGTH) {
+                if (!originalTexts.has(node)) {
+                  originalTexts.set(node, text);
+                }
+                const revealed = revealText(text);
+                if (revealed !== text) {
+                  node.textContent = revealed;
+                }
               }
             }
           }
         }
 
-        // Handle text changes in existing nodes (streaming responses)
-        if (mutation.type === 'characterData' && settings.revealMode) {
-          const text = mutation.target.textContent;
-          if (text && text.length >= MIN_STRING_LENGTH) {
-            const parent = mutation.target.parentElement;
-            if (parent && !SKIP_REVEAL_TAGS.has(parent.tagName)) {
-              if (!originalTexts.has(mutation.target)) {
-                originalTexts.set(mutation.target, text);
-              }
-              const revealed = revealText(text);
-              if (revealed !== text) {
-                mutation.target.textContent = revealed;
+        // Handle streaming text changes
+        if (mutation.type === 'characterData') {
+          hasNewContent = true;
+          if (settings.revealMode) {
+            const text = mutation.target.textContent;
+            if (text && text.length >= MIN_STRING_LENGTH) {
+              const parent = mutation.target.parentElement;
+              if (parent && !SKIP_REVEAL_TAGS.has(parent.tagName)) {
+                if (!originalTexts.has(mutation.target)) {
+                  originalTexts.set(mutation.target, text);
+                }
+                const revealed = revealText(text);
+                if (revealed !== text) {
+                  mutation.target.textContent = revealed;
+                }
               }
             }
           }
         }
       }
+
+      if (hasNewContent) scheduleHighlightRefresh();
     });
 
     observer.observe(document.body, {
@@ -790,15 +1024,175 @@
   }
 
   // ============================================================
-  // Input Highlighting
+  // Pre-Send PPI Detection — scans as you type/paste (spellcheck style)
   // ============================================================
+
+  // Generate obviously-fake values using reserved/standard ranges
+  // These are recognizable as placeholders and guaranteed not to be real
+  function generateFake(type, value) {
+    switch (type) {
+      case 'Private IP':
+      case 'Public IP':
+        // RFC 5737 — reserved for documentation, never routed
+        return '192.0.2.1';
+      case 'MAC Address':
+        return '00:00:00:00:00:00';
+      case 'Street Address':
+        return '123 Example Street, Anytown, ST 00000';
+      case 'GPS Coordinates':
+        return '0.000000,0.000000';
+      case 'Date (possible DOB)':
+        return '01/01/1970';
+      case 'EIN / Tax ID':
+        return '00-0000000';
+      case 'Home Path':
+        if (value.startsWith('C:\\')) return 'C:\\Users\\user';
+        if (value.startsWith('/Users/')) return '/Users/user';
+        return '/home/user';
+      case 'Shell Prompt':
+        return 'user@host:$ ';
+      case 'Git Remote':
+        return value.replace(/[:/][^/\s]+\//, ':/example/');
+      case 'Env Variable':
+        return value.split('=')[0] + '=REDACTED';
+      default:
+        return '[REDACTED]';
+    }
+  }
+
+  // Pre-send warning UI
+  let preSendWarningEl = null;
+  let preSendTimer = null;
+
+  function showPreSendWarning(warnings, inputEl) {
+    if (!preSendWarningEl) {
+      preSendWarningEl = document.createElement('div');
+      preSendWarningEl.className = 'ss-presend-warning';
+      document.body.appendChild(preSendWarningEl);
+    }
+
+    const items = warnings.slice(0, 8).map((w, i) => {
+      const fake = generateFake(w.name, w.value);
+      const displayVal = w.value.length > 25 ? w.value.slice(0, 22) + '...' : w.value;
+      return `<div class="ss-ps-item">
+        <span class="ss-ps-type">${w.name}</span>
+        <code class="ss-ps-value">${displayVal}</code>
+        <span class="ss-ps-hint">${w.hint}</span>
+        ${settings.autoAddDetected !== false
+          ? `<button class="ss-ps-add" data-real="${encodeURIComponent(w.value)}" data-fake="${encodeURIComponent(fake)}" data-cat="${w.category}" title="Add mapping: ${displayVal} → ${fake}">+</button>`
+          : ''}
+      </div>`;
+    }).join('');
+
+    const more = warnings.length > 8 ? `<div class="ss-ad-more">+${warnings.length - 8} more</div>` : '';
+
+    preSendWarningEl.innerHTML = `
+      <div class="ss-ad-header">
+        <strong>Potential PPI detected — not yet configured:</strong>
+        <button class="ss-ad-close">&times;</button>
+      </div>
+      ${items}
+      ${more}
+      <div class="ss-ad-footer">
+        ${settings.autoRedactDetected !== false ? 'Auto-redacted with standard placeholders.' : 'These were sent as-is.'}
+        ${settings.autoAddDetected !== false ? ' Click + to add a permanent mapping.' : ''}
+      </div>
+    `;
+
+    preSendWarningEl.classList.add('visible');
+
+    // Close button
+    preSendWarningEl.querySelector('.ss-ad-close').addEventListener('click', () => {
+      preSendWarningEl.classList.remove('visible');
+    });
+
+    // Auto-add buttons
+    preSendWarningEl.querySelectorAll('.ss-ps-add').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const real = decodeURIComponent(btn.dataset.real);
+        const fake = decodeURIComponent(btn.dataset.fake);
+        const cat = btn.dataset.cat || 'general';
+
+        // Add to mappings via storage
+        const result = await getStorageData('ss_mappings');
+        const currentMappings = result || [];
+        currentMappings.push({
+          id: crypto.randomUUID(),
+          real, substitute: fake,
+          category: cat,
+          caseSensitive: false,
+          enabled: true,
+          createdAt: Date.now(),
+        });
+        await setStorageData('ss_mappings', currentMappings);
+
+        // Update local mappings
+        mappings = currentMappings;
+
+        // Visual feedback
+        btn.textContent = '\u2714';
+        btn.style.color = '#4ade80';
+        btn.disabled = true;
+      });
+    });
+  }
+
+  // Storage helpers for page world (uses postMessage to injector)
+  function getStorageData(key) {
+    return new Promise(resolve => {
+      const id = 'ss-get-' + Math.random();
+      const handler = (event) => {
+        if (event.data?.type === 'ss:storage-result' && event.data.id === id) {
+          window.removeEventListener('message', handler);
+          resolve(event.data.value);
+        }
+      };
+      window.addEventListener('message', handler);
+      window.postMessage({ type: 'ss:storage-get', key, id }, '*');
+      // Timeout fallback
+      setTimeout(() => { window.removeEventListener('message', handler); resolve(null); }, 2000);
+    });
+  }
+
+  function setStorageData(key, value) {
+    window.postMessage({ type: 'ss:storage-set', key, value }, '*');
+  }
+
+  // Scan input on type and paste
+  let inputScanTimer = null;
+
+  function scanInputForPPI(target) {
+    const text = target.textContent || target.value || '';
+    if (!text || text.length < 5) {
+      if (preSendWarningEl) preSendWarningEl.classList.remove('visible');
+      return;
+    }
+
+    const warnings = autoDetectPPI(text, identity);
+    if (warnings.length > 0) {
+      showPreSendWarning(warnings, target);
+    } else if (preSendWarningEl) {
+      preSendWarningEl.classList.remove('visible');
+    }
+  }
+
   document.addEventListener('input', (e) => {
-    if (!settings.showHighlights || !hasSubstitutions()) return;
+    if (settings.autoDetect === false) return;
     const target = e.target;
     if (target.matches?.('[contenteditable], textarea, input[type="text"]')) {
-      const text = target.textContent || target.value || '';
-      const r = substituteAll(text);
-      target.classList.toggle('ss-has-sensitive', r.modified);
+      // Debounce — don't scan on every keystroke
+      if (inputScanTimer) clearTimeout(inputScanTimer);
+      inputScanTimer = setTimeout(() => scanInputForPPI(target), 800);
+    }
+  }, true);
+
+  document.addEventListener('paste', (e) => {
+    if (settings.autoDetect === false) return;
+    const target = e.target;
+    if (target.matches?.('[contenteditable], textarea, input[type="text"]') ||
+        target.closest?.('[contenteditable]')) {
+      // Scan shortly after paste completes
+      setTimeout(() => scanInputForPPI(target.closest?.('[contenteditable]') || target), 200);
     }
   }, true);
 

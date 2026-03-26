@@ -15,6 +15,38 @@
   if (window.__silentSendInjected) return;
   window.__silentSendInjected = true;
 
+  // Merge active profiles into flat identity object
+  function mergeProfiles(data) {
+    const profiles = data?.profiles || [];
+    const active = profiles.filter(p => p.active);
+
+    if (active.length === 0) {
+      // Legacy format: data IS the flat identity (pre-profile migration)
+      if (data && (data.names || data.emails || data.usernames)) return data;
+      return { emails: [], names: [], usernames: [], hostnames: [], phones: [],
+        catchAllEmail: '', emailDomains: [],
+        enabled: { emails: true, names: true, usernames: true, phones: true, paths: true } };
+    }
+
+    const merged = {
+      emails: [], names: [], usernames: [], hostnames: [], phones: [],
+      catchAllEmail: '', emailDomains: [],
+      enabled: { emails: true, names: true, usernames: true, phones: true, paths: true },
+    };
+
+    for (const p of active) {
+      merged.emails.push(...(p.emails || []));
+      merged.names.push(...(p.names || []));
+      merged.usernames.push(...(p.usernames || []));
+      merged.hostnames.push(...(p.hostnames || []));
+      merged.phones.push(...(p.phones || []));
+      if (p.catchAllEmail && !merged.catchAllEmail) merged.catchAllEmail = p.catchAllEmail;
+      merged.emailDomains.push(...(p.emailDomains || []));
+    }
+
+    return merged;
+  }
+
   // Cross-browser API
   const api =
     typeof browser !== 'undefined' && browser.runtime
@@ -27,8 +59,11 @@
   async function init() {
     const result = await api.storage.local.get(['ss_mappings', 'ss_identity', 'ss_settings']);
     const mappings = result.ss_mappings || [];
-    const identity = result.ss_identity || {};
     const settings = result.ss_settings || { enabled: true };
+
+    // Merge active profiles into a flat identity object for the content script
+    const identityData = result.ss_identity || {};
+    const identity = mergeProfiles(identityData);
 
     // Inject the main interception script into the page's world
     const script = document.createElement('script');
@@ -71,15 +106,14 @@
       }
     });
 
-    // Forward storage changes to the page script
+    // Forward storage changes to the page script (merge profiles before sending)
     api.storage.onChanged.addListener((changes) => {
       if (changes.ss_mappings || changes.ss_identity || changes.ss_settings) {
-        window.postMessage({
-          type: 'ss:config-updated',
-          mappings: changes.ss_mappings?.newValue,
-          identity: changes.ss_identity?.newValue,
-          settings: changes.ss_settings?.newValue,
-        }, '*');
+        const msg = { type: 'ss:config-updated' };
+        if (changes.ss_mappings) msg.mappings = changes.ss_mappings.newValue;
+        if (changes.ss_identity) msg.identity = mergeProfiles(changes.ss_identity.newValue);
+        if (changes.ss_settings) msg.settings = changes.ss_settings.newValue;
+        window.postMessage(msg, '*');
       }
     });
 
@@ -90,6 +124,24 @@
           type: 'ss:config-updated',
           settings: message.settings,
         }, '*');
+      }
+    });
+
+    // Storage bridge — lets page world script read/write storage
+    window.addEventListener('message', async (event) => {
+      if (event.source !== window) return;
+
+      if (event.data?.type === 'ss:storage-get') {
+        const result = await api.storage.local.get(event.data.key);
+        window.postMessage({
+          type: 'ss:storage-result',
+          id: event.data.id,
+          value: result[event.data.key] || null,
+        }, '*');
+      }
+
+      if (event.data?.type === 'ss:storage-set') {
+        await api.storage.local.set({ [event.data.key]: event.data.value });
       }
     });
   }

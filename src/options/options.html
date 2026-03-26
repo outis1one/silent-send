@@ -59,6 +59,36 @@
       </div>
       <div class="setting-row">
         <div>
+          <label>Auto-detect unconfigured PPI</label>
+          <p class="setting-desc">Warn when potential personal data (IPs, addresses, paths) is detected that you haven't configured</p>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="autoDetect" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <div>
+          <label>Auto-redact detected PPI on send</label>
+          <p class="setting-desc">Automatically replace detected PPI with generic placeholders (192.0.2.1, 123 Example Street, etc.) when sending</p>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="autoRedactDetected" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <div>
+          <label>Offer to auto-add detected PPI</label>
+          <p class="setting-desc">Show a + button on detected PPI to instantly create a mapping with a suggested fake value</p>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="autoAddDetected" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <div>
           <label>Max log entries</label>
           <p class="setting-desc">Number of activity log entries to keep</p>
         </div>
@@ -67,12 +97,23 @@
     </section>
 
     <section class="section">
+      <h2>Transfer Data</h2>
+      <p class="section-desc">Export all your identities, mappings, and settings to move between browsers. Encrypted exports require a password to decrypt.</p>
+      <div class="bulk-actions">
+        <button class="btn" id="btnExportAll">Export All (plain)</button>
+        <button class="btn" id="btnExportEncrypted">Export Encrypted</button>
+        <button class="btn" id="btnImportAll">Import</button>
+        <input type="file" id="fileImportAll" accept=".json,.ssbackup" hidden>
+      </div>
+    </section>
+
+    <section class="section">
       <h2>Mappings</h2>
       <p class="section-desc">Manage all your substitution rules. Longer matches take priority.</p>
 
       <div class="bulk-actions">
-        <button class="btn" id="btnExport">Export JSON</button>
-        <button class="btn" id="btnImport">Import JSON</button>
+        <button class="btn" id="btnExport">Export Mappings</button>
+        <button class="btn" id="btnImport">Import Mappings</button>
         <input type="file" id="fileImport" accept=".json" hidden>
         <button class="btn btn-danger" id="btnClearAll">Clear All</button>
       </div>

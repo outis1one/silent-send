@@ -20,7 +20,9 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
-# --- Auto-bump patch version ---
+# --- Auto-bump version — always unique, no metadata ---
+# Reads current version, increments patch. If already signed,
+# keeps incrementing until it works.
 CURRENT_VERSION=$(grep -o '"version": "[^"]*"' "$MANIFEST" | head -1 | grep -o '[0-9.]*')
 IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
 PATCH=$((PATCH + 1))
@@ -86,17 +88,33 @@ echo ""
 echo "Building Firefox extension..."
 "$SCRIPT_DIR/build.sh" firefox
 
-# Sign
-echo "Signing v$NEW_VERSION with Mozilla..."
-npx web-ext sign \
-  --no-config-discovery \
-  --source-dir "$SCRIPT_DIR/dist/firefox" \
-  --artifacts-dir "$SCRIPT_DIR/dist/firefox-signed" \
-  --channel unlisted \
-  --api-key "$API_KEY" \
-  --api-secret "$API_SECRET"
+# Sign — retry with incremented patch if version conflict
+MAX_ATTEMPTS=10
+for attempt in $(seq 1 $MAX_ATTEMPTS); do
+  echo "Signing v$NEW_VERSION with Mozilla (attempt $attempt)..."
 
-echo ""
-echo "Done! v$NEW_VERSION signed."
-echo "Install the .xpi file from dist/firefox-signed/"
-echo "Drag it into Firefox or use File → Open File."
+  if npx web-ext sign \
+    --no-config-discovery \
+    --source-dir "$SCRIPT_DIR/dist/firefox" \
+    --artifacts-dir "$SCRIPT_DIR/dist/firefox-signed" \
+    --channel unlisted \
+    --api-key "$API_KEY" \
+    --api-secret "$API_SECRET" 2>&1; then
+
+    echo ""
+    echo "Done! v$NEW_VERSION signed."
+    echo "Install the .xpi file from dist/firefox-signed/"
+    echo "Drag it into Firefox or use File → Open File."
+    exit 0
+  fi
+
+  # If it failed due to version conflict, bump and rebuild
+  echo "Version $NEW_VERSION already exists, trying next..."
+  PATCH=$((PATCH + 1))
+  NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+
+  sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$NEW_VERSION\"/" "$SCRIPT_DIR/dist/firefox/manifest.json"
+done
+
+echo "Error: Failed after $MAX_ATTEMPTS attempts."
+exit 1

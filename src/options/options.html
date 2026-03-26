@@ -463,6 +463,7 @@
           <option value="ssn">SSN</option>
           <option value="dob">DOB</option>
           <option value="domain">Domain</option>
+          <option value="password">Password</option>
           <option value="general">General</option>
         </select>
         <label class="checkbox-label">
@@ -470,6 +471,47 @@
           Aa
         </label>
         <button class="btn btn-primary" id="btnAddMapping">Add</button>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Passwords</h2>
+      <p class="section-desc">
+        Imported passwords are automatically redacted when sent to AI services.
+        Password values are hidden by default — enter your vault password to reveal them.
+      </p>
+
+      <div id="passwordsLocked" style="margin-bottom:12px">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span style="font-size:12px;color:#6b7280">&#128274; Password values are hidden</span>
+          <input type="password" id="passwordRevealKey" placeholder="Vault password to reveal" autocomplete="current-password"
+            style="font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;width:180px">
+          <button class="btn btn-sm" id="btnRevealPasswords">Reveal</button>
+        </div>
+        <div id="passwordRevealStatus" style="font-size:11px;margin-top:4px;min-height:14px"></div>
+      </div>
+
+      <div id="passwordsUnlocked" style="display:none;margin-bottom:12px">
+        <div style="display:flex;gap:8px;align-items:center">
+          <span style="font-size:12px;color:#b45309">&#128275; Passwords visible</span>
+          <button class="btn btn-sm" id="btnHidePasswords">Hide</button>
+        </div>
+      </div>
+
+      <table class="mapping-table">
+        <thead>
+          <tr>
+            <th>Password</th>
+            <th>Redacted As</th>
+            <th>Enabled</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="passwordTableBody">
+        </tbody>
+      </table>
+      <div id="noPasswordsMsg" style="text-align:center;color:#9ca3af;padding:16px;font-size:13px;display:none">
+        No passwords imported. Use Transfer Data → Import to add passwords from your password manager.
       </div>
     </section>
 

@@ -765,34 +765,48 @@
     const urlStr = typeof url === 'string' ? url : url?.url || '';
     const method = (options?.method || 'GET').toUpperCase();
 
-    // Only intercept POST/PUT/PATCH with a string body
+    // Only intercept POST/PUT/PATCH with a body
     if (
       (method === 'POST' || method === 'PUT' || method === 'PATCH') &&
-      options?.body && typeof options.body === 'string' &&
+      options?.body &&
       !shouldSkipUrl(urlStr)
     ) {
-      try {
-        // Try JSON
-        const body = JSON.parse(options.body);
-        const { modified, replacements } = processBody(body);
-
-        if (modified) {
-          options = { ...options, body: JSON.stringify(body) };
-          notifySubstitutions(replacements);
-          console.log(
-            `[Silent Send] Substituted ${replacements.length} value(s) in ${urlStr}`
-          );
+      // Handle FormData with file uploads
+      if (options.body instanceof FormData) {
+        try {
+          const newFormData = await processFormData(options.body);
+          if (newFormData) {
+            options = { ...options, body: newFormData };
+          }
+        } catch (e) {
+          console.warn('[Silent Send] FormData processing failed:', e);
         }
-      } catch (e) {
-        // Not JSON — try raw string substitution (form data, etc.)
-        if (options.body.length > MIN_STRING_LENGTH) {
-          const result = substituteAll(options.body);
-          if (result.modified) {
-            options = { ...options, body: result.text };
-            notifySubstitutions(result.replacements);
+      }
+      // Handle string bodies (JSON, raw text)
+      else if (typeof options.body === 'string') {
+        try {
+          // Try JSON
+          const body = JSON.parse(options.body);
+          const { modified, replacements } = processBody(body);
+
+          if (modified) {
+            options = { ...options, body: JSON.stringify(body) };
+            notifySubstitutions(replacements);
             console.log(
-              `[Silent Send] Substituted ${result.replacements.length} value(s) in form body`
+              `[Silent Send] Substituted ${replacements.length} value(s) in ${urlStr}`
             );
+          }
+        } catch (e) {
+          // Not JSON — try raw string substitution (form data, etc.)
+          if (options.body.length > MIN_STRING_LENGTH) {
+            const result = substituteAll(options.body);
+            if (result.modified) {
+              options = { ...options, body: result.text };
+              notifySubstitutions(result.replacements);
+              console.log(
+                `[Silent Send] Substituted ${result.replacements.length} value(s) in form body`
+              );
+            }
           }
         }
       }
@@ -800,6 +814,367 @@
 
     return originalFetch.call(this, url, options);
   };
+
+  // ============================================================
+  // Document Upload Processing
+  //
+  // Scans files in FormData uploads for PPI. Supports PDF, DOCX,
+  // XLSX, and text files. Shows preview for binary formats.
+  // ============================================================
+
+  async function processFormData(formData) {
+    let modified = false;
+    const newFormData = new FormData();
+    const allReplacements = [];
+
+    for (const [key, value] of formData.entries()) {
+      if (value instanceof File && value.size > 0) {
+        // Process the file through document scanner
+        const usePreview = settings.docScanPreview !== false &&
+          /\.(pdf|docx|xlsx)$/i.test(value.name);
+
+        const result = await documentScan(value, value.name, {
+          previewMode: usePreview,
+        });
+
+        if (result.preview && usePreview && result.replacements.length > 0) {
+          // Show preview and wait for user confirmation
+          const confirmed = await showDocScanPreview(result.preview, value.name);
+          if (!confirmed) {
+            // User cancelled — use original file
+            newFormData.append(key, value);
+            continue;
+          }
+        }
+
+        if (result.replacements.length > 0 && !result.skipped) {
+          let uploadFile = result.file;
+
+          // If preview was confirmed and we have sanitized text, use it
+          if (result._sanitizedText) {
+            uploadFile = new Blob([result._sanitizedText], { type: 'text/plain' });
+          }
+
+          const newFile = new File([uploadFile], result.filename || value.name, {
+            type: uploadFile.type || value.type,
+          });
+          newFormData.append(key, newFile);
+          allReplacements.push(...result.replacements);
+          modified = true;
+          console.log(
+            `[Silent Send] Substituted ${result.replacements.length} value(s) in file: ${value.name}`
+          );
+        } else {
+          newFormData.append(key, value);
+        }
+      } else if (typeof value === 'string') {
+        // String form field — substitute
+        const result = substituteAll(value);
+        if (result.modified) {
+          newFormData.append(key, result.text);
+          allReplacements.push(...result.replacements);
+          modified = true;
+        } else {
+          newFormData.append(key, value);
+        }
+      } else {
+        newFormData.append(key, value);
+      }
+    }
+
+    if (modified) {
+      notifySubstitutions(allReplacements);
+      return newFormData;
+    }
+    return null;
+  }
+
+  /**
+   * Scan a document file for PPI. Strategy: extract text from any
+   * format, substitute PPI, upload as plaintext. The AI extracts text
+   * from files anyway — no need to preserve formatting in a file
+   * the user never gets back. Original stays untouched on disk.
+   *
+   * Supported: PDF, DOCX, DOC, XLSX, XLS, ODT, ODS, ODP, PPTX, RTF,
+   * and all text/code formats.
+   */
+  async function documentScan(file, filename, options) {
+    const ext = (filename || '').split('.').pop().toLowerCase();
+
+    // Plain text formats — direct substitution, keep original extension
+    const textExts = new Set(['txt','csv','tsv','json','md','markdown','log',
+      'yaml','yml','toml','ini','cfg','conf','xml','html','htm','css',
+      'js','ts','py','rb','go','rs','java','c','cpp','h','hpp','sh',
+      'bash','zsh','ps1','bat','sql','r','swift','kt','scala','pl','php',
+      'lua','vim','env','gitignore']);
+
+    if (textExts.has(ext)) {
+      const text = await file.text();
+      const result = substituteAll(text);
+      if (result.modified) {
+        return {
+          file: new Blob([result.text], { type: file.type || 'text/plain' }),
+          filename, replacements: result.replacements,
+        };
+      }
+      return { file, filename, replacements: [] };
+    }
+
+    // Binary document formats — extract text, substitute, upload as .txt
+    const docExts = new Set(['pdf','docx','doc','xlsx','xls','odt','ods',
+      'odp','rtf','pptx']);
+
+    if (!docExts.has(ext)) {
+      return { file, filename, replacements: [], skipped: true };
+    }
+
+    try {
+      const text = await extractTextFromDocument(file, ext);
+
+      if (!text || text.trim().length < 5) {
+        return { file, filename, replacements: [], skipped: true,
+          reason: `No extractable text in ${ext.toUpperCase()} (may be scanned/image-only)` };
+      }
+
+      const result = substituteAll(text);
+      const preview = {
+        format: ext,
+        replacementCount: result.replacements.length,
+        replacements: result.replacements.slice(0, 15),
+        note: `${ext.toUpperCase()} text extracted and sanitized for upload`,
+      };
+
+      if (options.previewMode && result.replacements.length > 0) {
+        return { file, filename, replacements: result.replacements, preview,
+          _sanitizedText: result.text };
+      }
+
+      if (result.modified) {
+        return {
+          file: new Blob([result.text], { type: 'text/plain' }),
+          filename: filename.replace(/\.[^.]+$/, '.txt'),
+          replacements: result.replacements, preview,
+        };
+      }
+      return { file, filename, replacements: [] };
+    } catch (e) {
+      console.warn(`[Silent Send] ${ext.toUpperCase()} processing failed:`, e);
+      return { file, filename, replacements: [], skipped: true, reason: e.message };
+    }
+  }
+
+  /**
+   * Extract text from any supported document format.
+   */
+  async function extractTextFromDocument(file, ext) {
+    switch (ext) {
+      case 'pdf': return extractPDFText(file);
+      case 'docx': case 'xlsx': case 'pptx':
+      case 'odt': case 'ods': case 'odp':
+        return extractZipXMLText(file, ext);
+      case 'doc': case 'xls':
+        return extractOldBinaryText(file);
+      case 'rtf':
+        return extractRTFText(file);
+      default: return '';
+    }
+  }
+
+  /** PDF: extract text from content stream operators (Tj, TJ). */
+  async function extractPDFText(file) {
+    const buffer = await file.arrayBuffer();
+    const str = new TextDecoder('latin1').decode(new Uint8Array(buffer));
+    const texts = [];
+    const re = /stream\r?\n([\s\S]*?)endstream/g;
+    let m;
+    while ((m = re.exec(str)) !== null) {
+      const content = m[1];
+      const parts = [];
+      const tj = /\(([^)]*)\)\s*Tj/g;
+      let t;
+      while ((t = tj.exec(content)) !== null) {
+        parts.push(t[1].replace(/\\([nrt\\()])/g, (_, c) =>
+          c === 'n' ? '\n' : c === 'r' ? '\r' : c === 't' ? '\t' : c));
+      }
+      const tjArr = /\[(.*?)\]\s*TJ/g;
+      while ((t = tjArr.exec(content)) !== null) {
+        const inner = /\(([^)]*)\)/g;
+        let s;
+        while ((s = inner.exec(t[1])) !== null) parts.push(s[1]);
+      }
+      if (parts.length) texts.push(parts.join(''));
+    }
+    return texts.join('\n');
+  }
+
+  /**
+   * DOCX/XLSX/PPTX/ODT/ODS/ODP: extract text from ZIP XML entries.
+   */
+  async function extractZipXMLText(file, ext) {
+    const buffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    const texts = [];
+
+    // Scan for ZIP local file headers
+    let pos = 0;
+    while (pos < bytes.length - 30) {
+      if (bytes[pos] !== 0x50 || bytes[pos+1] !== 0x4b ||
+          bytes[pos+2] !== 0x03 || bytes[pos+3] !== 0x04) {
+        pos++; continue;
+      }
+      const view = new DataView(buffer, pos);
+      const compMethod = view.getUint16(8, true);
+      const compSize = view.getUint32(18, true);
+      const nameLen = view.getUint16(26, true);
+      const extraLen = view.getUint16(28, true);
+      const name = new TextDecoder().decode(bytes.slice(pos + 30, pos + 30 + nameLen));
+      const dataStart = pos + 30 + nameLen + extraLen;
+      const rawData = bytes.slice(dataStart, dataStart + compSize);
+
+      if (isTextXML(name, ext) && compSize > 0) {
+        let xmlStr;
+        try {
+          if (compMethod === 8) {
+            const dec = await inflateData(rawData);
+            xmlStr = dec ? new TextDecoder('utf-8').decode(dec) : null;
+          } else if (compMethod === 0) {
+            xmlStr = new TextDecoder('utf-8').decode(rawData);
+          }
+        } catch { /* skip */ }
+        if (xmlStr) {
+          const re2 = />([^<]+)</g;
+          let m2;
+          while ((m2 = re2.exec(xmlStr)) !== null) {
+            const t = m2[1].trim();
+            if (t.length >= 2 && !/^[\x00-\x1f]+$/.test(t)) texts.push(t);
+          }
+        }
+      }
+      pos = dataStart + compSize;
+    }
+    return texts.join(' ');
+  }
+
+  function isTextXML(name, ext) {
+    switch (ext) {
+      case 'docx': return /^word\/(document|header|footer|comments|endnotes|footnotes)/i.test(name);
+      case 'xlsx': return name === 'xl/sharedStrings.xml' || /^xl\/worksheets\/sheet/i.test(name);
+      case 'pptx': return /^ppt\/slides\/slide/i.test(name);
+      case 'odt': case 'odp': return name === 'content.xml' || name === 'styles.xml';
+      case 'ods': return name === 'content.xml';
+      default: return name.endsWith('.xml');
+    }
+  }
+
+  /** Old binary .doc/.xls: extract readable text runs. */
+  async function extractOldBinaryText(file) {
+    const buffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    const texts = [];
+    // UTF-16LE extraction (Word stores text as UTF-16)
+    let cur = '';
+    for (let i = 0; i < bytes.length - 1; i += 2) {
+      const code = bytes[i] | (bytes[i + 1] << 8);
+      if (code >= 32 && code < 127) { cur += String.fromCharCode(code); }
+      else { if (cur.length >= 3) texts.push(cur); cur = ''; }
+    }
+    if (cur.length >= 3) texts.push(cur);
+    // ASCII fallback
+    cur = '';
+    for (let i = 0; i < bytes.length; i++) {
+      if (bytes[i] >= 32 && bytes[i] < 127) { cur += String.fromCharCode(bytes[i]); }
+      else { if (cur.length >= 4) texts.push(cur); cur = ''; }
+    }
+    if (cur.length >= 4) texts.push(cur);
+    const seen = new Set();
+    return texts.filter(t => {
+      if (seen.has(t)) return false;
+      seen.add(t);
+      return t.includes(' ') || t.length >= 8;
+    }).join(' ');
+  }
+
+  /** RTF: strip formatting, extract text. */
+  async function extractRTFText(file) {
+    const text = await file.text();
+    return text
+      .replace(/\{\\[^{}]*\}/g, '')
+      .replace(/\\[a-z]+\d*\s?/gi, '')
+      .replace(/[{}]/g, '')
+      .replace(/\\\\/g, '\\')
+      .replace(/\\\'([0-9a-f]{2})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+      .trim();
+  }
+
+  /** Decompress DEFLATE data using DecompressionStream API. */
+  async function inflateData(data) {
+    if (typeof DecompressionStream === 'undefined') return null;
+    try {
+      const ds = new DecompressionStream('deflate');
+      const writer = ds.writable.getWriter();
+      const reader = ds.readable.getReader();
+      writer.write(data); writer.close();
+      const chunks = [];
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+      }
+      const total = chunks.reduce((s, c) => s + c.length, 0);
+      const result = new Uint8Array(total);
+      let p = 0;
+      for (const c of chunks) { result.set(c, p); p += c.length; }
+      return result;
+    } catch { return null; }
+  }
+
+  // Document Scan Preview UI
+  let docPreviewEl = null;
+
+  function showDocScanPreview(preview, filename) {
+    return new Promise((resolve) => {
+      if (!docPreviewEl) {
+        docPreviewEl = document.createElement('div');
+        docPreviewEl.className = 'ss-doc-preview';
+        document.body.appendChild(docPreviewEl);
+      }
+      const items = (preview.replacements || []).map(r =>
+        `<div class="ss-dp-item">
+          <code class="ss-dp-orig">${(r.original || '').length > 25 ? r.original.slice(0, 22) + '...' : r.original}</code>
+          <span>&rarr;</span>
+          <code class="ss-dp-repl">${r.replaced}</code>
+        </div>`
+      ).join('');
+
+      docPreviewEl.innerHTML = `
+        <div class="ss-dp-header">
+          <strong>PPI found in ${esc(filename)}</strong>
+          <span class="ss-dp-count">${preview.replacementCount} item(s)</span>
+        </div>
+        <div class="ss-dp-note">${preview.note || ''}</div>
+        <div class="ss-dp-items">${items}</div>
+        <div class="ss-dp-actions">
+          <button class="ss-dp-btn ss-dp-confirm">Substitute & Upload</button>
+          <button class="ss-dp-btn ss-dp-cancel">Upload Original</button>
+        </div>
+      `;
+      docPreviewEl.classList.add('visible');
+      const confirm = docPreviewEl.querySelector('.ss-dp-confirm');
+      const cancel = docPreviewEl.querySelector('.ss-dp-cancel');
+      const cleanup = () => {
+        docPreviewEl.classList.remove('visible');
+        confirm.removeEventListener('click', onConfirm);
+        cancel.removeEventListener('click', onCancel);
+      };
+      const onConfirm = () => { cleanup(); resolve(true); };
+      const onCancel = () => { cleanup(); resolve(false); };
+      confirm.addEventListener('click', onConfirm);
+      cancel.addEventListener('click', onCancel);
+      setTimeout(() => {
+        if (docPreviewEl.classList.contains('visible')) { cleanup(); resolve(false); }
+      }, 30000);
+    });
+  }
 
   // ============================================================
   // XMLHttpRequest Interception — same aggressive approach

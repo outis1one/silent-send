@@ -40,7 +40,7 @@ const DEFAULT_SETTINGS = {
   autoAddDetected: true,
   maxLogEntries: 200,
   customDomains: [],
-  categories: ['name', 'email', 'phone', 'address', 'ssn', 'dob', 'domain', 'general'],
+  categories: ['name', 'email', 'phone', 'address', 'ssn', 'dob', 'domain', 'password', 'general'],
   browserSync: false,
 };
 

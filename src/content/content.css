@@ -16,9 +16,10 @@
 /* Revealed text styling (when reveal mode shows real values in responses) */
 .ss-revealed {
   background: rgba(59, 130, 246, 0.1);
-  border-bottom: 1.5px dashed rgba(59, 130, 246, 0.5);
+  border-bottom: 2px solid rgba(59, 130, 246, 0.6);
   border-radius: 2px;
-  padding: 0 1px;
+  padding: 0 2px;
+  cursor: help;
 }
 
 /* Floating reveal mode indicator */

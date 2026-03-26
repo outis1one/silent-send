@@ -630,37 +630,109 @@
 
   function revealInElement(el) {
     if (SKIP_REVEAL_TAGS.has(el.tagName)) return;
-    // Skip our own badge
     if (el.classList?.contains('ss-reveal-badge')) return;
+    if (el.classList?.contains('ss-revealed')) return; // skip our own spans
 
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
         const parent = node.parentElement;
         if (parent && SKIP_REVEAL_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
         if (parent?.classList?.contains('ss-reveal-badge')) return NodeFilter.FILTER_REJECT;
+        if (parent?.classList?.contains('ss-revealed')) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }
     });
 
+    // Collect nodes first (modifying DOM during walk breaks the walker)
+    const nodes = [];
     let textNode;
     while ((textNode = walker.nextNode())) {
-      const text = textNode.textContent;
+      nodes.push(textNode);
+    }
+
+    if (!_revealPairsCache) _revealPairsCache = buildRevealPairs();
+    const pairs = _revealPairsCache;
+
+    for (const node of nodes) {
+      const text = node.textContent;
       if (!text || text.length < MIN_STRING_LENGTH) continue;
 
-      if (!originalTexts.has(textNode)) {
-        originalTexts.set(textNode, text);
+      // Save original
+      if (!originalTexts.has(node)) {
+        originalTexts.set(node, text);
       }
 
-      const revealed = revealText(text);
-      if (revealed !== text) {
-        textNode.textContent = revealed;
+      // Find all substituted values and their positions
+      const segments = [];
+      let remaining = text;
+      let offset = 0;
+
+      for (const p of pairs) {
+        const escaped = esc(p.from);
+        const regex = new RegExp(escaped, p.caseSensitive ? 'gi' : 'gi');
+        let match;
+        while ((match = regex.exec(text)) !== null) {
+          segments.push({
+            start: match.index,
+            end: match.index + match[0].length,
+            original: match[0],
+            revealed: p.to,
+          });
+        }
       }
+
+      if (segments.length === 0) continue;
+
+      // Sort by position, deduplicate overlaps
+      segments.sort((a, b) => a.start - b.start);
+      const deduped = [];
+      let lastEnd = -1;
+      for (const s of segments) {
+        if (s.start >= lastEnd) {
+          deduped.push(s);
+          lastEnd = s.end;
+        }
+      }
+
+      // Build fragment: text + highlighted spans
+      const frag = document.createDocumentFragment();
+      let pos = 0;
+
+      for (const s of deduped) {
+        // Text before this match
+        if (s.start > pos) {
+          frag.appendChild(document.createTextNode(text.slice(pos, s.start)));
+        }
+        // Highlighted revealed value
+        const span = document.createElement('span');
+        span.className = 'ss-revealed';
+        span.textContent = s.revealed;
+        span.title = 'Substituted value: ' + s.original;
+        frag.appendChild(span);
+        pos = s.end;
+      }
+
+      // Remaining text after last match
+      if (pos < text.length) {
+        frag.appendChild(document.createTextNode(text.slice(pos)));
+      }
+
+      // Replace the text node with the fragment
+      node.parentNode.replaceChild(frag, node);
     }
   }
 
   function unrevealInElement(el) {
     if (SKIP_REVEAL_TAGS.has(el.tagName)) return;
 
+    // Remove all ss-revealed spans, restoring original text
+    const spans = el.querySelectorAll('.ss-revealed');
+    for (const span of spans) {
+      const text = document.createTextNode(span.title?.replace('Substituted value: ', '') || span.textContent);
+      span.parentNode.replaceChild(text, span);
+    }
+
+    // Also restore any text nodes that were modified without spans
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     let textNode;
     while ((textNode = walker.nextNode())) {
@@ -669,6 +741,9 @@
         textNode.textContent = original;
       }
     }
+
+    // Normalize adjacent text nodes
+    el.normalize();
   }
 
   // Elements to skip when revealing (inputs, scripts, styles, extension UI)

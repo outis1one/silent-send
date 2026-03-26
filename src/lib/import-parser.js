@@ -13,9 +13,9 @@
  *    Imports as identity fields with blank substitutes so the user
  *    can see what needs mapping and fill in fakes.
  *
- * 3. Chrome password CSV export — extracts usernames, names, URLs
+ * 3. Chrome password CSV export — extracts usernames, names, URLs, passwords
  *    Columns: name, url, username, password, note
- *    Passwords are NEVER imported. Only usernames/emails/URLs.
+ *    Passwords are imported as auto-redacted mappings (e.g. → [REDACTED-PASSWORD-1]).
  *
  * 4. Firefox password CSV export — similar to Chrome
  *    Columns: url, username, password, ...
@@ -139,7 +139,10 @@ const ImportParser = {
 
   /**
    * Parse Chrome/Firefox password CSV export.
-   * NEVER imports passwords — only usernames, emails, and domains.
+   * Imports usernames, emails, domains, AND passwords.
+   * Passwords are imported as mappings with auto-generated redaction
+   * substitutes (e.g. "[REDACTED-PASSWORD-1]") so they get caught
+   * if pasted into any context — not just key=value patterns.
    */
   parsePasswordCSV(text) {
     const result = this._empty();
@@ -148,12 +151,15 @@ const ImportParser = {
 
     const headers = this._splitCSVLine(lines[0], ',').map(h => h.trim().toLowerCase());
     const usernameIdx = headers.findIndex(h => h === 'username' || h === 'login_username' || h === 'user');
+    const passwordIdx = headers.findIndex(h => h === 'password' || h === 'login_password');
     const urlIdx = headers.findIndex(h => h === 'url' || h === 'login_uri' || h === 'origin' || h === 'web site');
     const nameIdx = headers.findIndex(h => h === 'name' || h === 'title');
 
     const seenEmails = new Set();
     const seenUsernames = new Set();
     const seenDomains = new Set();
+    const seenPasswords = new Set();
+    let passwordCount = 0;
 
     for (let i = 1; i < lines.length; i++) {
       const cols = this._splitCSVLine(lines[i], ',');
@@ -169,6 +175,22 @@ const ImportParser = {
             seenUsernames.add(username);
             result.identity.usernames.push({ real: username, substitute: '' });
           }
+        }
+      }
+
+      // Extract password — import as a redacted mapping
+      if (passwordIdx >= 0 && cols[passwordIdx]) {
+        const password = cols[passwordIdx].trim();
+        // Skip very short or empty passwords, and deduplicate
+        if (password && password.length >= 4 && !seenPasswords.has(password)) {
+          seenPasswords.add(password);
+          passwordCount++;
+          result.mappings.push({
+            real: password,
+            substitute: `[REDACTED-PASSWORD-${passwordCount}]`,
+            category: 'password',
+            caseSensitive: true,
+          });
         }
       }
 
@@ -202,9 +224,12 @@ const ImportParser = {
 
     const headers = this._splitCSVLine(lines[0], ',').map(h => h.trim().toLowerCase());
     const usernameIdx = headers.findIndex(h => h.includes('username'));
+    const passwordIdx = headers.findIndex(h => h.includes('password'));
     const uriIdx = headers.findIndex(h => h.includes('uri') || h.includes('url'));
 
     const seen = new Set();
+    const seenPasswords = new Set();
+    let passwordCount = 0;
 
     for (let i = 1; i < lines.length; i++) {
       const cols = this._splitCSVLine(lines[i], ',');
@@ -218,6 +243,20 @@ const ImportParser = {
           } else if (val.length >= 3) {
             result.identity.usernames.push({ real: val, substitute: '' });
           }
+        }
+      }
+
+      if (passwordIdx >= 0 && cols[passwordIdx]) {
+        const pw = cols[passwordIdx].trim();
+        if (pw && pw.length >= 4 && !seenPasswords.has(pw)) {
+          seenPasswords.add(pw);
+          passwordCount++;
+          result.mappings.push({
+            real: pw,
+            substitute: `[REDACTED-PASSWORD-${passwordCount}]`,
+            category: 'password',
+            caseSensitive: true,
+          });
         }
       }
 

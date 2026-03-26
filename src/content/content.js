@@ -346,6 +346,114 @@
 
   const CONTEXT_WORDS_RE = /\b(?:born|birthday|dob|birth|passport|license|driver|ssn|social\s*security|address|zip|postal|date\s+of\s+birth)\b/i;
 
+  // Common English words that are capitalized but aren't proper nouns.
+  // Used by the proper noun heuristic to reduce false positives.
+  const COMMON_CAPITALIZED = new Set([
+    'the', 'a', 'an', 'and', 'or', 'but', 'if', 'then', 'else', 'when',
+    'at', 'by', 'for', 'with', 'about', 'against', 'between', 'through',
+    'during', 'before', 'after', 'above', 'below', 'to', 'from', 'up',
+    'down', 'in', 'out', 'on', 'off', 'over', 'under', 'again', 'further',
+    'then', 'once', 'here', 'there', 'all', 'each', 'every', 'both',
+    'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not',
+    'only', 'own', 'same', 'so', 'than', 'too', 'very', 'can', 'will',
+    'just', 'should', 'now', 'also', 'into', 'could', 'would', 'may',
+    'might', 'shall', 'must', 'need', 'have', 'has', 'had', 'do', 'does',
+    'did', 'be', 'is', 'am', 'are', 'was', 'were', 'been', 'being',
+    'get', 'got', 'make', 'made', 'go', 'went', 'gone', 'take', 'took',
+    'come', 'came', 'see', 'saw', 'know', 'knew', 'think', 'thought',
+    'say', 'said', 'tell', 'told', 'give', 'gave', 'find', 'found',
+    'want', 'let', 'put', 'set', 'run', 'keep', 'try', 'start', 'turn',
+    'show', 'hear', 'play', 'move', 'live', 'believe', 'bring', 'happen',
+    'write', 'provide', 'sit', 'stand', 'lose', 'pay', 'meet', 'include',
+    'continue', 'learn', 'change', 'lead', 'understand', 'watch', 'follow',
+    'stop', 'create', 'speak', 'read', 'allow', 'add', 'spend', 'grow',
+    'open', 'walk', 'win', 'offer', 'remember', 'love', 'consider', 'appear',
+    'buy', 'wait', 'serve', 'die', 'send', 'expect', 'build', 'stay',
+    'fall', 'cut', 'reach', 'kill', 'remain', 'suggest', 'raise', 'pass',
+    'sell', 'require', 'report', 'decide', 'pull', 'develop', 'note',
+    'however', 'because', 'although', 'since', 'while', 'where', 'which',
+    'what', 'who', 'how', 'why', 'this', 'that', 'these', 'those',
+    'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her',
+    'us', 'them', 'my', 'your', 'his', 'its', 'our', 'their',
+    'new', 'old', 'big', 'small', 'long', 'short', 'good', 'bad',
+    'great', 'little', 'right', 'left', 'first', 'last', 'next',
+    'sure', 'like', 'well', 'back', 'still', 'even', 'much', 'many',
+    // Programming/tech words that appear capitalized
+    'string', 'number', 'boolean', 'object', 'array', 'function', 'class',
+    'type', 'error', 'null', 'undefined', 'true', 'false', 'return',
+    'import', 'export', 'default', 'const', 'let', 'var', 'async', 'await',
+    'try', 'catch', 'throw', 'finally', 'switch', 'case', 'break',
+    'note', 'example', 'warning', 'important', 'todo', 'fixme', 'hack',
+    'step', 'option', 'result', 'value', 'key', 'data', 'info',
+    'file', 'code', 'test', 'debug', 'config', 'setup', 'update',
+    // Common sentence starters that aren't names
+    'please', 'thanks', 'hello', 'hi', 'hey', 'dear', 'sincerely',
+    'regards', 'best', 'cheers', 'sorry', 'yes', 'no', 'ok', 'okay',
+    // Days and months (not PPI)
+    'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+    'january', 'february', 'march', 'april', 'may', 'june', 'july',
+    'august', 'september', 'october', 'november', 'december',
+    'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun',
+    'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
+  ]);
+
+  /**
+   * Detect proper nouns (potential names, company names, project names)
+   * that aren't configured in identity. Uses capitalization heuristics:
+   * - Capitalized words not at the start of a sentence
+   * - Multi-word capitalized sequences (e.g. "Acme Corp", "Project Atlas")
+   * - Filters out common English words and programming terms
+   */
+  function detectProperNouns(text, configured) {
+    const findings = [];
+    // Match capitalized words that aren't at the very start of the text
+    // and aren't after a period/newline (sentence start)
+    const re = /(?:^|[.!?\n]\s*)?([A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})*)/g;
+    let m;
+
+    while ((m = re.exec(text)) !== null) {
+      const fullMatch = m[1];
+      if (!fullMatch) continue;
+
+      // Check if this is at the start of a sentence
+      const before = text.slice(Math.max(0, m.index - 2), m.index);
+      const isSentenceStart = m.index === 0 || /[.!?\n]\s*$/.test(before);
+
+      // Split into individual words and check each
+      const words = fullMatch.split(/\s+/);
+      const properWords = words.filter(w =>
+        w.length >= 3 &&
+        !COMMON_CAPITALIZED.has(w.toLowerCase()) &&
+        !configured.has(w.toLowerCase())
+      );
+
+      if (properWords.length === 0) continue;
+
+      // Single capitalized word at sentence start = likely not a proper noun
+      if (isSentenceStart && properWords.length === 1 && words.length === 1) continue;
+
+      // Multi-word capitalized sequence is likely a proper noun
+      // Single capitalized word mid-sentence is likely a proper noun
+      const value = properWords.join(' ');
+      if (value.length >= 3 && !configured.has(value.toLowerCase())) {
+        findings.push({
+          name: 'Possible Name/Org',
+          value,
+          hint: 'Capitalized word — could be a name, company, or project',
+          category: 'name',
+        });
+      }
+    }
+
+    // Deduplicate
+    const seen = new Set();
+    return findings.filter(f => {
+      if (seen.has(f.value)) return false;
+      seen.add(f.value);
+      return true;
+    });
+  }
+
   function autoDetectPPI(text, ident) {
     if (!text || text.length < 5) return [];
     const hasContext = CONTEXT_WORDS_RE.test(text);
@@ -373,6 +481,11 @@
         findings.push({ name: pat.name, value: val, hint: pat.hint, category: pat.cat });
       }
     }
+
+    // Proper noun heuristic — catch names, company names, project names
+    // that aren't configured in identity
+    const properNouns = detectProperNouns(text, configured);
+    findings.push(...properNouns);
 
     // Deduplicate by value
     const seen = new Set();

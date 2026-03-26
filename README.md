@@ -60,6 +60,36 @@ A browser extension (Chrome + Firefox) that intercepts personal information and 
 | `123-45-6789` | `[REDACTED-SSN]` |
 | `4111 1111 1111 1111` | `[REDACTED-CARD]` |
 
+### Proper noun detection (automatic)
+
+The auto-detect scanner also catches capitalized words mid-sentence that might be names, company names, or project names you forgot to configure. For example:
+
+| You type | What happens |
+|----------|-------------|
+| `...talked to Sarah about the deploy` | Flags "Sarah" as a possible name |
+| `...the Acme Corp internal API` | Flags "Acme Corp" as a possible organization |
+| `...pushed to Project Atlas staging` | Flags "Project Atlas" as a possible project name |
+
+These are flagged as warnings (not auto-redacted) so you can decide whether to add them as mappings. Common English words, programming terms, days, and months are excluded to reduce false positives.
+
+### Bulk import (speed up setup)
+
+Import your existing data from password managers and browser autofill to pre-populate identity and mappings:
+
+| Source | What's imported |
+|---|---|
+| Chrome password CSV | Usernames, emails, domains, passwords (auto-redacted) |
+| Firefox logins CSV | Usernames, emails, domains, passwords (auto-redacted) |
+| Bitwarden CSV | Usernames, emails, domains, passwords (auto-redacted) |
+| 1Password CSV | Usernames, emails, domains, passwords (auto-redacted) |
+| Browser autofill CSV | Names, emails, phones, addresses |
+| Plain CSV (2 columns) | Real → substitute pairs |
+| Plain text (1 per line) | Auto-categorized values needing substitutes |
+
+Passwords are imported as exact-match mappings (e.g. `MyS3cret!` → `[REDACTED-PASSWORD-1]`) so they get caught in any context — not just `password=value` patterns.
+
+Go to **Options** → **Transfer Data** → **Import CSV / Password Export**.
+
 ## First-time setup
 
 After installing the extension, **it does nothing until you configure it**. The icon will be gray to remind you.
@@ -266,8 +296,74 @@ src/
     crypto.js           — AES-256-GCM encryption, PBKDF2 key derivation, TOTP (RFC 6238), WebAuthn, key caching
     sync.js             — Cross-browser sync with encryption (browser sync, Gist, folder, URL, sync codes)
     storage.js          — Browser storage wrapper with transparent at-rest encryption
+    auto-detect.js      — PPI pattern detection (IPs, addresses, paths, proper nouns)
+    import-parser.js    — Bulk import from CSV, password managers, autofill exports
+    version-history.js  — Sync version snapshots + rollback
+    merge.js            — Three-way field-level merge for sync conflicts
+    org-policy.js       — Organization policy management (shared rules, compliance)
+    tamper-guard.js     — Admin password protection for destructive actions
     browser-polyfill.js — Chrome/Firefox API compatibility
 ```
+
+## Sync features
+
+### Auto sync
+
+When configured, the extension automatically pushes and pulls settings on a configurable interval (5/15/30/60 minutes) using GitHub Gist or a custom URL endpoint. Local changes trigger an immediate push.
+
+### Conflict resolution
+
+When both this device and another device change the same data between syncs, the extension performs a three-way merge:
+- Non-conflicting changes are merged automatically
+- True conflicts (same field changed on both sides) are presented in a side-by-side UI where you choose "Keep Local" or "Keep Remote" for each conflict
+
+### Version history + rollback
+
+Every sync operation saves a snapshot of your data. You can browse previous versions and restore any snapshot. Configurable max snapshots (default 10).
+
+### Connected devices
+
+Each device registers itself with a name and browser type. The device list is shared via sync data so you can see all connected devices, when they last synced, and remove old ones.
+
+## Organization / Team
+
+For teams that want to enforce privacy rules across all members:
+
+1. **Admin** creates a JSON policy file hosted at any URL (static file, S3, cloud function)
+2. **Team members** join by entering the policy URL or an invite code in Options → Organization
+3. **Org rules merge** with personal rules — required mappings are always active and cannot be disabled
+4. **Compliance dashboard** shows which required fields are configured (without revealing actual PPI)
+5. **Policy updates** are polled automatically (hourly)
+
+### Org policy format
+
+```json
+{
+  "orgId": "acme-corp",
+  "orgName": "Acme Corp",
+  "version": 2,
+  "requiredMappings": [
+    { "real": "acme-internal.com", "substitute": "example-corp.com", "category": "domain" }
+  ],
+  "requiredSecretPatterns": [
+    { "name": "Acme Token", "regex": "acme_[a-z0-9]{32}", "redact": "[REDACTED-ACME-TOKEN]" }
+  ],
+  "sharedIdentityRules": {
+    "requireCatchAllEmail": true,
+    "requiredCategories": ["name", "email", "domain"]
+  }
+}
+```
+
+### Tamper protection
+
+Optional admin password (separate from vault password) that gates destructive actions:
+- Disabling the extension
+- Clearing data or mappings
+- Leaving an organization
+- Exporting data in plaintext
+
+This is a deterrent for casual tampering. It cannot prevent browser-level uninstall or developer tools access.
 
 ## Privacy & Security
 
@@ -350,6 +446,25 @@ Reveal mode only replaces values that were **actually substituted** in outbound 
 - **Non-standard secret formats** — The secret scanner knows common API key prefixes (sk-, ghp_, AKIA, etc.) but won't catch custom or proprietary token formats.
 
 **You should still review sensitive messages before sending.** Silent Send is a safety net, not a guarantee. Think of it like a spell checker for privacy — it catches most things, but you wouldn't send a legal document without proofreading.
+
+## Legal
+
+### Liability
+
+Silent Send is provided **"as is" without warranty of any kind**. The disclaimer section above explicitly documents known limitations. Users should not rely on Silent Send as their sole privacy protection.
+
+To mitigate litigation risk:
+- The extension clearly states it is a **convenience tool, not a security guarantee** in both the README and the popup footer
+- Known failure modes are documented (images, file uploads, encoded data, unconfigured data)
+- The "~85-90% correctness" estimate sets realistic expectations
+- No marketing claims of "complete protection" or "guaranteed privacy" are made
+- The BSL license includes standard liability limitation language
+
+This is comparable to how antivirus software, ad blockers, and password managers handle liability — they document limitations, disclaim warranties, and don't claim perfection. The key is to never overstate what the tool does.
+
+### Open source
+
+The source code is available under BSL 1.1. Contributions are welcome. If you find a bug, especially a privacy-related one, please report it.
 
 ## License
 

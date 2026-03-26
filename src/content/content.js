@@ -276,9 +276,27 @@
     }
 
     // 4. Auto-detect: scan the FINAL text for unconfigured PPI
+    //    Auto-redact if enabled, otherwise just warn
     if (settings.autoDetect !== false) {
       const warnings = autoDetectPPI(finalText, identity);
       if (warnings.length > 0) {
+        // Auto-redact detected PPI in the outbound text
+        if (settings.autoRedactDetected !== false) {
+          for (let i = warnings.length - 1; i >= 0; i--) {
+            const w = warnings[i];
+            const fake = generateFake(w.name, w.value);
+            const escaped = esc(w.value);
+            const regex = new RegExp(escaped, 'g');
+            finalText = finalText.replace(regex, fake);
+            allReplacements.push({
+              original: w.value,
+              replaced: fake,
+              category: 'auto-detect',
+              pattern: w.name,
+            });
+          }
+        }
+        // Still show the warning so user knows what was caught
         showAutoDetectWarning(warnings);
       }
     }
@@ -1009,43 +1027,37 @@
   // Pre-Send PPI Detection — scans as you type/paste (spellcheck style)
   // ============================================================
 
-  // Generate plausible fake values for detected PPI
+  // Generate obviously-fake values using reserved/standard ranges
+  // These are recognizable as placeholders and guaranteed not to be real
   function generateFake(type, value) {
     switch (type) {
       case 'Private IP':
       case 'Public IP':
-        return '10.' + rnd(1,254) + '.' + rnd(1,254) + '.' + rnd(1,254);
+        // RFC 5737 — reserved for documentation, never routed
+        return '192.0.2.1';
       case 'MAC Address':
-        return Array.from({length:6}, () => rnd(0,255).toString(16).padStart(2,'0')).join(':');
+        return '00:00:00:00:00:00';
       case 'Street Address':
-        const streets = ['Oak', 'Maple', 'Pine', 'Cedar', 'Elm', 'Main', 'Park', 'Lake'];
-        const types = ['St', 'Ave', 'Dr', 'Ln', 'Rd'];
-        return rnd(100,9999) + ' ' + streets[rnd(0,7)] + ' ' + types[rnd(0,4)];
+        return '123 Example Street, Anytown, ST 00000';
       case 'GPS Coordinates':
-        return (rnd(-90,90) + Math.random()).toFixed(6) + ',' + (rnd(-180,180) + Math.random()).toFixed(6);
+        return '0.000000,0.000000';
       case 'Date (possible DOB)':
-        return (rnd(1,12) + '').padStart(2,'0') + '/' + (rnd(1,28) + '').padStart(2,'0') + '/' + rnd(1950,2005);
+        return '01/01/1970';
       case 'EIN / Tax ID':
-        return rnd(10,99) + '-' + (rnd(1000000,9999999) + '');
-      case 'Home Path': {
-        const fakeUser = 'user' + rnd(100,999);
-        if (value.startsWith('C:\\')) return 'C:\\Users\\' + fakeUser;
-        if (value.startsWith('/Users/')) return '/Users/' + fakeUser;
-        return '/home/' + fakeUser;
-      }
+        return '00-0000000';
+      case 'Home Path':
+        if (value.startsWith('C:\\')) return 'C:\\Users\\user';
+        if (value.startsWith('/Users/')) return '/Users/user';
+        return '/home/user';
       case 'Shell Prompt':
-        return 'user@computer:$ ';
+        return 'user@host:$ ';
       case 'Git Remote':
-        return value.replace(/[:/][^/\s]+\//, ':/anonymous/');
+        return value.replace(/[:/][^/\s]+\//, ':/example/');
       case 'Env Variable':
         return value.split('=')[0] + '=REDACTED';
       default:
         return '[REDACTED]';
     }
-  }
-
-  function rnd(min, max) {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
   }
 
   // Pre-send warning UI
@@ -1082,8 +1094,8 @@
       ${items}
       ${more}
       <div class="ss-ad-footer">
-        ${settings.autoAddDetected !== false ? 'Click + to auto-add a mapping.' : ''}
-        Add to Identity or Mappings to protect this data.
+        ${settings.autoRedactDetected !== false ? 'Auto-redacted with standard placeholders.' : 'These were sent as-is.'}
+        ${settings.autoAddDetected !== false ? ' Click + to add a permanent mapping.' : ''}
       </div>
     `;
 

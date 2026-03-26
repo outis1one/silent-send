@@ -69,6 +69,16 @@
       </div>
       <div class="setting-row">
         <div>
+          <label>Auto-redact detected PPI on send</label>
+          <p class="setting-desc">Automatically replace detected PPI with generic placeholders (192.0.2.1, 123 Example Street, etc.) when sending</p>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="autoRedactDetected" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <div>
           <label>Offer to auto-add detected PPI</label>
           <p class="setting-desc">Show a + button on detected PPI to instantly create a mapping with a suggested fake value</p>
         </div>

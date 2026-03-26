@@ -254,6 +254,7 @@
 
   // ============================================================
   // Combined substitution: smart patterns + explicit + secret scan
+  // + auto-detect warning for unconfigured PPI
   // ============================================================
   function substituteAll(text) {
     const allReplacements = [];
@@ -267,21 +268,144 @@
     allReplacements.push(...explicit.replacements);
 
     // 3. Secret scanner (API keys, tokens, SSNs, credit cards, etc.)
+    let finalText = explicit.text;
     if (settings.secretScanning !== false) {
-      const secrets = scanAndRedactSecrets(explicit.text);
+      const secrets = scanAndRedactSecrets(finalText);
       allReplacements.push(...secrets.redactions);
-      return {
-        text: secrets.text,
-        replacements: allReplacements,
-        modified: allReplacements.length > 0,
-      };
+      finalText = secrets.text;
+    }
+
+    // 4. Auto-detect: scan the FINAL text for unconfigured PPI
+    if (settings.autoDetect !== false) {
+      const warnings = autoDetectPPI(finalText, identity);
+      if (warnings.length > 0) {
+        showAutoDetectWarning(warnings);
+      }
     }
 
     return {
-      text: explicit.text,
+      text: finalText,
       replacements: allReplacements,
       modified: allReplacements.length > 0,
     };
+  }
+
+  // ============================================================
+  // Auto-Detect PPI Scanner (inline for page world)
+  // ============================================================
+  const PPI_PATTERNS = [
+    // Network
+    { name: 'Private IP', re: /\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})\b/g,
+      hint: 'Private IP address', cat: 'network' },
+    { name: 'Public IP', re: /\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b/g,
+      hint: 'IP address — could identify your network', cat: 'network',
+      skip: /^(?:127\.0\.0\.1|0\.0\.0\.0|255\.255\.255\.\d+|8\.8\.[84]\.[84]|1\.1\.1\.1)$/ },
+    { name: 'MAC Address', re: /\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b/g,
+      hint: 'MAC address — identifies hardware', cat: 'network' },
+    // Location
+    { name: 'Street Address', re: /\b\d{1,5}\s+(?:[A-Z][a-z]+\s+){1,3}(?:St|Street|Ave|Avenue|Blvd|Boulevard|Dr|Drive|Ln|Lane|Rd|Road|Way|Ct|Court|Pl|Place)\.?\b/gi,
+      hint: 'Street address', cat: 'address' },
+    { name: 'GPS Coordinates', re: /\b-?\d{1,3}\.\d{4,},\s*-?\d{1,3}\.\d{4,}\b/g,
+      hint: 'GPS coordinates — pinpoints a location', cat: 'address' },
+    // Personal
+    { name: 'Date (possible DOB)', re: /\b(?:(?:0[1-9]|1[0-2])[-/](?:0[1-9]|[12]\d|3[01])[-/](?:19|20)\d{2}|(?:19|20)\d{2}[-/](?:0[1-9]|1[0-2])[-/](?:0[1-9]|[12]\d|3[01]))\b/g,
+      hint: 'Date — could be a birthday', cat: 'personal' },
+    { name: 'EIN / Tax ID', re: /\b\d{2}-\d{7}\b/g,
+      hint: 'Could be a tax ID', cat: 'document' },
+    // Paths not caught by smart patterns
+    { name: 'Home Path', re: /(?:\/home\/|\/Users\/|C:\\Users\\)[a-zA-Z0-9._-]+/g,
+      hint: 'Home directory — reveals username', cat: 'path' },
+    // Shell prompts
+    { name: 'Shell Prompt', re: /[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+[:\$#%>]\s/g,
+      hint: 'Shell prompt — reveals user@host', cat: 'prompt' },
+    // Git remotes
+    { name: 'Git Remote', re: /(?:git@|https:\/\/)(?:github|gitlab|bitbucket)\.[a-z]+[:/][^\s]+/gi,
+      hint: 'Git remote — may reveal username/org', cat: 'url' },
+    // Env vars
+    { name: 'Env Variable', re: /\b(?:HOME|USER|USERNAME|LOGNAME|HOSTNAME|COMPUTERNAME|EMAIL)=[^\s]+/gi,
+      hint: 'Env variable with personal data', cat: 'env' },
+  ];
+
+  function autoDetectPPI(text, ident) {
+    if (!text || text.length < 5) return [];
+
+    // Build skip set from configured values
+    const configured = new Set();
+    if (ident) {
+      const addAll = (arr, key) => (arr || []).forEach(item => {
+        if (item.real) configured.add(item.real.toLowerCase());
+        if (item.substitute) configured.add(item.substitute.toLowerCase());
+      });
+      addAll(ident.names); addAll(ident.emails);
+      addAll(ident.usernames); addAll(ident.hostnames); addAll(ident.phones);
+    }
+
+    const findings = [];
+    for (const pat of PPI_PATTERNS) {
+      pat.re.lastIndex = 0;
+      let m;
+      while ((m = pat.re.exec(text)) !== null) {
+        const val = m[0];
+        if (configured.has(val.toLowerCase())) continue;
+        if (pat.skip && pat.skip.test(val)) continue;
+        findings.push({ name: pat.name, value: val, hint: pat.hint, category: pat.cat });
+      }
+    }
+
+    // Deduplicate by value
+    const seen = new Set();
+    return findings.filter(f => {
+      if (seen.has(f.value)) return false;
+      seen.add(f.value);
+      return true;
+    });
+  }
+
+  // ============================================================
+  // Auto-Detect Warning UI — floating banner
+  // ============================================================
+  let warningEl = null;
+  let warningTimeout = null;
+
+  function showAutoDetectWarning(warnings) {
+    if (!warningEl) {
+      warningEl = document.createElement('div');
+      warningEl.className = 'ss-autodetect-warning';
+      document.body.appendChild(warningEl);
+    }
+
+    const items = warnings.slice(0, 5).map(w =>
+      `<div class="ss-ad-item">
+        <span class="ss-ad-type">${w.name}</span>
+        <code class="ss-ad-value">${w.value.length > 30 ? w.value.slice(0, 27) + '...' : w.value}</code>
+        <span class="ss-ad-hint">${w.hint}</span>
+      </div>`
+    ).join('');
+
+    const more = warnings.length > 5 ? `<div class="ss-ad-more">+${warnings.length - 5} more</div>` : '';
+
+    warningEl.innerHTML = `
+      <div class="ss-ad-header">
+        <strong>Silent Send detected potential PPI that may not be substituted:</strong>
+        <button class="ss-ad-close">&times;</button>
+      </div>
+      ${items}
+      ${more}
+      <div class="ss-ad-footer">These were sent as-is. Consider adding them to your identity or mappings.</div>
+    `;
+
+    warningEl.classList.add('visible');
+
+    // Close button
+    warningEl.querySelector('.ss-ad-close').addEventListener('click', () => {
+      warningEl.classList.remove('visible');
+    });
+
+    // Auto-dismiss after 15 seconds
+    if (warningTimeout) clearTimeout(warningTimeout);
+    warningTimeout = setTimeout(() => {
+      warningEl.classList.remove('visible');
+    }, 15000);
   }
 
   // ============================================================

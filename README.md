@@ -136,13 +136,15 @@ This downloads the extension code to a `silent-send` folder on your computer.
 
 ### Chrome
 
-1. Open `chrome://extensions/` in Chrome
+1. Open `chrome://extensions/` in Chrome (or `brave://extensions/` in Brave)
 2. Enable **Developer mode** (toggle in the top right corner)
 3. Click **Load unpacked**
 4. Navigate to the `silent-send` folder you cloned and select it
 5. Navigate to any supported AI site — the extension icon appears in your toolbar
 
 That's it for Chrome. No build step, no account, no store, no fees.
+
+> **Important:** After reloading the extension (e.g. after a code update), you must **refresh any open AI chat tabs** (F5 or Ctrl+R). The old content script keeps running until the page is refreshed.
 
 ### Firefox (signed, persistent)
 

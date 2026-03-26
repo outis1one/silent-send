@@ -4,13 +4,15 @@ A browser extension (Chrome + Firefox) that intercepts personal information and 
 
 ### Supported services
 
-| Service | Domains |
-|---------|---------|
-| Claude | claude.ai, claude.ai/code |
-| ChatGPT | chatgpt.com, chat.openai.com |
-| Grok | grok.x.ai, x.com/i/grok |
-| Gemini | gemini.google.com |
-| OpenWebUI | localhost, 127.0.0.1 (self-hosted) |
+| Service | Domains | Status |
+|---------|---------|--------|
+| Claude | claude.ai, claude.ai/code | Tested |
+| ChatGPT | chatgpt.com, chat.openai.com | Untested |
+| Grok | grok.x.ai, x.com/i/grok | Untested |
+| Gemini | gemini.google.com | Untested |
+| OpenWebUI | localhost, 127.0.0.1 (self-hosted) | Untested |
+
+> **Note:** Only Claude has been tested so far. The other services have API interception patterns defined but may need adjustments. PRs welcome.
 
 ## How it works
 
@@ -47,63 +49,85 @@ A browser extension (Chrome + Firefox) that intercepts personal information and 
 
 ## Installation
 
+### Prerequisites
+
+You need [Git](https://git-scm.com/downloads) and [Node.js](https://nodejs.org/) (v18+) installed.
+
+Clone the repo:
+```bash
+git clone https://github.com/outis1one/silent-send.git
+cd silent-send
+```
+
 ### Chrome (Developer Mode)
-1. Clone this repo
-2. Run `./build.sh chrome` (or just use the root directory directly)
-3. Open `chrome://extensions/`
-4. Enable **Developer mode** (top right)
-5. Click **Load unpacked** → select `dist/chrome/` (or root dir)
-6. Navigate to claude.ai — the extension is active
+
+1. Run `./build.sh chrome` (or just use the root directory directly)
+2. Open `chrome://extensions/` in your browser
+3. Enable **Developer mode** (toggle in the top right corner)
+4. Click **Load unpacked** → navigate to and select the `dist/chrome/` folder (or the repo root)
+5. Navigate to any supported AI site — the extension icon appears in your toolbar
+
+That's it for Chrome. No account, no store, no fees.
 
 ### Firefox (signed, persistent)
 
-Firefox requires extensions to be signed. Mozilla provides free self-hosted signing — no store listing needed.
+Firefox requires extensions to be cryptographically signed before it will install them permanently. Mozilla provides free self-hosted signing — no store listing, no review process, no fees.
 
-#### Step 1: Get your Mozilla API credentials
+#### Step 1: Create a free Firefox account
+
+1. Go to https://accounts.firefox.com/ and create an account (or sign in if you have one)
+2. This is the same account used for Firefox Sync — you may already have one
+
+#### Step 2: Get your Mozilla API credentials
 
 1. Go to https://addons.mozilla.org/developers/addon/api/key/
-2. Sign in with a Firefox account (create one free if you don't have one)
+2. Sign in with your Firefox account from step 1
 3. On that page you'll see two values:
-   - **JWT issuer** — looks like `user:12345678:901`
-   - **JWT secret** — a long alphanumeric string
-4. These are your API key and secret
+   - **JWT issuer** — this is your API key, looks like `user:12345678:901`
+   - **JWT secret** — a long alphanumeric string, this is your API secret
+4. Keep this page open — you'll need both values in the next step
 
-#### Step 2: Configure and sign
+#### Step 3: Configure your credentials
 
 ```bash
 # Install dependencies
 npm install
 
-# Copy the env template and fill in your credentials
+# Copy the env template
 cp .env.example .env
 ```
 
-Edit `.env` with the values from step 1:
+Now open `.env` in any text editor and paste in your values from step 2:
 ```
 WEB_EXT_API_KEY="user:12345678:901"
 WEB_EXT_API_SECRET="your-jwt-secret-here"
 ```
 
-Then build and sign:
+Save the file.
+
+#### Step 4: Build and sign
+
 ```bash
 source .env && npm run sign:firefox
 ```
 
-This produces a signed `.xpi` file in `dist/firefox-signed/`.
+This builds the Firefox version and submits it to Mozilla for signing. It takes 10-30 seconds. When done, you'll see a signed `.xpi` file in `dist/firefox-signed/`.
 
-#### Step 3: Install the signed extension
+#### Step 5: Install the signed extension
 
 - Drag the `.xpi` file into any Firefox window, **or**
 - Firefox menu → File → Open File → select the `.xpi`
-- Click "Add" when prompted
+- Click **Add** when prompted
 
-The signed `.xpi` is **permanent** — it survives browser restarts, updates, everything. No store listing, no review process, no fees.
+The signed `.xpi` is **permanent** — it survives browser restarts, updates, everything. No store listing, no review process, no fees. You only need to re-sign when you update to a new version.
 
 ### Firefox (temporary, for development)
+
+If you just want to try it out without signing:
 ```bash
 npm install && npm run run:firefox
 ```
-Opens Firefox with the extension pre-loaded. Auto-reloads on file changes. Resets when Firefox closes.
+This opens a fresh Firefox with the extension pre-loaded. Auto-reloads on file changes. Resets when Firefox closes — useful for testing, not for daily use.
 
 ## Architecture
 

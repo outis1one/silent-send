@@ -1,14 +1,16 @@
 /**
  * Silent Send - Cross-Browser Settings Sync
  *
- * Two sync mechanisms:
+ * Sync mechanisms:
  *
- * 1. Sync Code — base64-encoded JSON snapshot for manual copy-paste between
- *    browsers (works across any browser/device combination).
- *
- * 2. browser.storage.sync — automatic sync within the same browser family
- *    (Firefox ↔ Firefox via Firefox Sync, Chrome ↔ Chrome via Google account).
- *    Data is chunked to stay within per-item size limits.
+ * 1. Sync Code — base64-encoded JSON snapshot for manual copy-paste.
+ * 2. browser.storage.sync — automatic within the same browser family.
+ * 3. Folder sync (File System Access API) — any locally-mounted folder
+ *    including Dropbox, OneDrive, Google Drive, iCloud, Nextcloud, etc.
+ * 4. GitHub Gist — serverless cloud sync using a personal access token;
+ *    works across any browser/device without a local desktop client.
+ * 5. Custom HTTP endpoint — any URL supporting GET + PUT (WebDAV,
+ *    self-hosted server, cloud function, etc.).
  *
  * Conflict resolution: newest `lastModified` timestamp wins.
  */
@@ -65,7 +67,7 @@ const SilentSendSync = {
         }
       }
 
-      await this._applyData(data);
+      await this._applyData(data, 'code');
       return { success: true, importTime: new Date(data.lastModified).toLocaleString() };
     } catch (e) {
       return { success: false, reason: e.message };
@@ -131,7 +133,7 @@ const SilentSendSync = {
       const json = chunkKeys.map(k => chunkResult[k] || '').join('');
       const data = JSON.parse(json);
 
-      await this._applyData(data);
+      await this._applyData(data, 'browser-sync');
       return { imported: true, time: new Date(data.lastModified).toLocaleString() };
     } catch (e) {
       console.warn('[Silent Send] pullFromSyncStorage failed:', e);
@@ -154,8 +156,12 @@ const SilentSendSync = {
     };
   },
 
-  async _applyData(data) {
-    const toSet = { ss_lastModified: data.lastModified };
+  async _applyData(data, source = 'unknown') {
+    const toSet = {
+      ss_lastModified: data.lastModified,
+      // Signal the service worker to show a badge/notification
+      ss_sync_notification: { source, time: Date.now() },
+    };
     if (data.identity !== undefined) toSet.ss_identity = data.identity;
     if (data.mappings !== undefined) toSet.ss_mappings = data.mappings;
     if (data.settings !== undefined) toSet.ss_settings = data.settings;
@@ -170,6 +176,205 @@ const SilentSendSync = {
     } catch {
       return [];
     }
+  },
+
+  // ----------------------------------------------------------------
+  // GitHub Gist sync
+  // Requires a personal access token with the `gist` scope.
+  // On first push a new secret Gist is created; the Gist ID is stored
+  // in local storage so all subsequent reads/writes use the same Gist.
+  // ----------------------------------------------------------------
+
+  /**
+   * Push current data to a GitHub Gist (creates one if no gist ID stored).
+   * token: GitHub PAT with `gist` scope.
+   * Returns { success, gistId } or { success: false, reason }.
+   */
+  async pushToGist(token) {
+    if (!token) return { success: false, reason: 'No GitHub token provided.' };
+    try {
+      const data = await this._getAllData();
+      const content = JSON.stringify(data, null, 2);
+      const stored = await api.storage.local.get('ss_gist_id');
+      const gistId = stored.ss_gist_id;
+
+      let resp;
+      if (gistId) {
+        // Update existing Gist
+        resp = await fetch(`https://api.github.com/gists/${gistId}`, {
+          method: 'PATCH',
+          headers: { Authorization: `token ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ files: { 'silent-send-sync.json': { content } } }),
+        });
+      } else {
+        // Create new secret Gist
+        resp = await fetch('https://api.github.com/gists', {
+          method: 'POST',
+          headers: { Authorization: `token ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            description: 'Silent Send settings sync',
+            public: false,
+            files: { 'silent-send-sync.json': { content } },
+          }),
+        });
+      }
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        return { success: false, reason: err.message || `HTTP ${resp.status}` };
+      }
+
+      const json = await resp.json();
+      await api.storage.local.set({ ss_gist_id: json.id });
+      return { success: true, gistId: json.id };
+    } catch (e) {
+      return { success: false, reason: e.message };
+    }
+  },
+
+  /**
+   * Pull data from a GitHub Gist and apply if newer.
+   * token: GitHub PAT with `gist` scope.
+   * Returns { success, imported?, reason? }.
+   */
+  async pullFromGist(token) {
+    if (!token) return { success: false, reason: 'No GitHub token provided.' };
+    try {
+      const stored = await api.storage.local.get('ss_gist_id');
+      const gistId = stored.ss_gist_id;
+      if (!gistId) return { success: false, reason: 'No Gist ID stored. Push first.' };
+
+      const resp = await fetch(`https://api.github.com/gists/${gistId}`, {
+        headers: { Authorization: `token ${token}` },
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        return { success: false, reason: err.message || `HTTP ${resp.status}` };
+      }
+
+      const gist = await resp.json();
+      const file = gist.files?.['silent-send-sync.json'];
+      if (!file) return { success: false, reason: 'Sync file not found in Gist.' };
+
+      // Fetch raw content (may be truncated in the API response)
+      const rawResp = await fetch(file.raw_url);
+      const data = JSON.parse(await rawResp.text());
+
+      const local = await this._getAllData();
+      if (data.lastModified <= (local.lastModified || 0)) {
+        return { success: true, imported: false };
+      }
+
+      await this._applyData(data, 'gist');
+      return { success: true, imported: true, time: new Date(data.lastModified).toLocaleString() };
+    } catch (e) {
+      return { success: false, reason: e.message };
+    }
+  },
+
+  // ----------------------------------------------------------------
+  // Custom HTTP endpoint sync
+  // GET fetches the JSON, PUT/PATCH writes it.
+  // Works with WebDAV (Nextcloud, ownCloud), any REST endpoint, or a
+  // simple static file server that supports PUT.
+  // ----------------------------------------------------------------
+
+  /**
+   * Push to a custom URL via HTTP PUT.
+   * opts: { url, method = 'PUT', headers = {} }
+   */
+  async pushToUrl({ url, method = 'PUT', headers = {} } = {}) {
+    if (!url) return { success: false, reason: 'No URL provided.' };
+    try {
+      const data = await this._getAllData();
+      const resp = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: JSON.stringify(data, null, 2),
+      });
+      if (!resp.ok) return { success: false, reason: `HTTP ${resp.status}` };
+      return { success: true };
+    } catch (e) {
+      return { success: false, reason: e.message };
+    }
+  },
+
+  /**
+   * Pull from a custom URL via HTTP GET and apply if newer.
+   * opts: { url, headers = {} }
+   */
+  async pullFromUrl({ url, headers = {} } = {}) {
+    if (!url) return { success: false, reason: 'No URL provided.' };
+    try {
+      const resp = await fetch(url, { headers });
+      if (!resp.ok) return { success: false, reason: `HTTP ${resp.status}` };
+      const data = await resp.json();
+
+      const local = await this._getAllData();
+      if (data.lastModified <= (local.lastModified || 0)) {
+        return { success: true, imported: false };
+      }
+
+      await this._applyData(data, 'url');
+      return { success: true, imported: true, time: new Date(data.lastModified).toLocaleString() };
+    } catch (e) {
+      return { success: false, reason: e.message };
+    }
+  },
+
+  // ----------------------------------------------------------------
+  // File System Access API helpers — folder-based sync
+  // The directory handle is stored in IndexedDB so the user only
+  // needs to grant access once per browser session.
+  // ----------------------------------------------------------------
+
+  _dbPromise: null,
+
+  _openDB() {
+    if (this._dbPromise) return this._dbPromise;
+    this._dbPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open('ss_sync_handles', 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('handles');
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    return this._dbPromise;
+  },
+
+  async saveSyncDirHandle(handle) {
+    const db = await this._openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('handles', 'readwrite');
+      tx.objectStore('handles').put(handle, 'syncDir');
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  },
+
+  async loadSyncDirHandle() {
+    try {
+      const db = await this._openDB();
+      return new Promise((resolve) => {
+        const tx = db.transaction('handles', 'readonly');
+        const req = tx.objectStore('handles').get('syncDir');
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+      });
+    } catch {
+      return null;
+    }
+  },
+
+  async clearSyncDirHandle() {
+    try {
+      const db = await this._openDB();
+      return new Promise((resolve) => {
+        const tx = db.transaction('handles', 'readwrite');
+        tx.objectStore('handles').delete('syncDir');
+        tx.oncomplete = resolve;
+        tx.onerror = resolve;
+      });
+    } catch { /* ignore */ }
   },
 };
 

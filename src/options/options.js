@@ -95,6 +95,107 @@ document.addEventListener('DOMContentLoaded', async () => {
     setSyncStatus('', 'neutral');
   });
 
+  // --- File-based auto-sync ---
+  // Tell the service worker the user has seen any pending sync notification
+  api.runtime.sendMessage({ type: 'sync:notification-seen' }).catch(() => {});
+  await api.storage.local.remove('ss_sync_notification');
+
+  await initFileSync();
+
+  $('#btnPickSyncFolder').addEventListener('click', pickSyncFolder);
+  $('#btnClearSyncFolder').addEventListener('click', async () => {
+    await SilentSendSync.clearSyncDirHandle();
+    syncDirHandle = null;
+    updateFileSyncUI();
+    setFileSyncStatus('Sync folder cleared.', 'neutral');
+  });
+
+  // Auto-write when local storage changes (catches popup edits, page-world adds, etc.)
+  api.storage.onChanged.addListener(async (changes, area) => {
+    if (area === 'local' && (changes.ss_settings || changes.ss_mappings || changes.ss_identity)) {
+      await writeToSyncFile();
+    }
+  });
+
+  // Re-check sync file whenever the options page regains focus
+  window.addEventListener('focus', async () => {
+    await checkFileSyncUpdate();
+  });
+
+  // --- GitHub Gist sync ---
+  // Restore saved token (session only — never persisted to storage)
+  {
+    const stored = await api.storage.local.get('ss_gist_id');
+    if (stored.ss_gist_id) {
+      setGistSyncStatus(`Gist ID: ${stored.ss_gist_id.slice(0, 12)}…`, 'ok');
+    }
+  }
+
+  $('#btnGistPush').addEventListener('click', async () => {
+    const token = $('#gistToken').value.trim();
+    if (!token) { setGistSyncStatus('Enter your GitHub PAT first.', 'warn'); return; }
+    setGistSyncStatus('Pushing…', 'neutral');
+    const r = await SilentSendSync.pushToGist(token);
+    if (r.success) {
+      setGistSyncStatus(`Pushed. Gist ID: ${r.gistId.slice(0, 12)}…`, 'ok');
+    } else {
+      setGistSyncStatus('Push failed: ' + r.reason, 'error');
+    }
+  });
+
+  $('#btnGistPull').addEventListener('click', async () => {
+    const token = $('#gistToken').value.trim();
+    if (!token) { setGistSyncStatus('Enter your GitHub PAT first.', 'warn'); return; }
+    setGistSyncStatus('Pulling…', 'neutral');
+    const r = await SilentSendSync.pullFromGist(token);
+    if (!r.success) {
+      setGistSyncStatus('Pull failed: ' + r.reason, 'error');
+    } else if (r.imported) {
+      setGistSyncStatus(`Pulled (${r.time}). Refreshing…`, 'ok');
+      mappings = await Storage.getMappings();
+      settings = await Storage.getSettings();
+      renderMappings();
+      renderDomains();
+      renderLog();
+    } else {
+      setGistSyncStatus('Already up to date.', 'ok');
+    }
+  });
+
+  // --- Custom URL sync ---
+  $('#btnUrlPush').addEventListener('click', async () => {
+    const url = $('#customSyncUrl').value.trim();
+    if (!url) { setUrlSyncStatus('Enter a URL first.', 'warn'); return; }
+    const headers = parseHeadersField($('#customSyncHeaders').value);
+    setUrlSyncStatus('Pushing…', 'neutral');
+    const r = await SilentSendSync.pushToUrl({ url, headers });
+    if (r.success) {
+      setUrlSyncStatus('Pushed successfully.', 'ok');
+    } else {
+      setUrlSyncStatus('Push failed: ' + r.reason, 'error');
+    }
+  });
+
+  $('#btnUrlPull').addEventListener('click', async () => {
+    const url = $('#customSyncUrl').value.trim();
+    if (!url) { setUrlSyncStatus('Enter a URL first.', 'warn'); return; }
+    const headers = parseHeadersField($('#customSyncHeaders').value);
+    setUrlSyncStatus('Pulling…', 'neutral');
+    const r = await SilentSendSync.pullFromUrl({ url, headers });
+    if (!r.success) {
+      setUrlSyncStatus('Pull failed: ' + r.reason, 'error');
+    } else if (r.imported) {
+      setUrlSyncStatus(`Pulled (${r.time}). Refreshing…`, 'ok');
+      mappings = await Storage.getMappings();
+      settings = await Storage.getSettings();
+      renderMappings();
+      renderDomains();
+      renderLog();
+    } else {
+      setUrlSyncStatus('Already up to date.', 'ok');
+    }
+  });
+
   // Transfer data
   $('#btnExportAll').addEventListener('click', exportAllPlain);
   $('#btnExportEncrypted').addEventListener('click', exportAllEncrypted);
@@ -463,6 +564,142 @@ async function importAll(e) {
 
   // Reset file input
   e.target.value = '';
+}
+
+// ----------------------------------------------------------------
+// File-based auto-sync (File System Access API)
+// ----------------------------------------------------------------
+
+let syncDirHandle = null;
+const SYNC_FILE_NAME = 'silent-send-sync.json';
+
+async function initFileSync() {
+  syncDirHandle = await SilentSendSync.loadSyncDirHandle();
+  updateFileSyncUI();
+  if (syncDirHandle) {
+    await checkFileSyncUpdate();
+  }
+}
+
+async function pickSyncFolder() {
+  if (!window.showDirectoryPicker) {
+    setFileSyncStatus('Your browser does not support the File System Access API.', 'error');
+    return;
+  }
+  try {
+    const handle = await window.showDirectoryPicker({ mode: 'readwrite', id: 'ss-sync' });
+    syncDirHandle = handle;
+    await SilentSendSync.saveSyncDirHandle(handle);
+    updateFileSyncUI();
+    // Write current settings immediately so the file exists for the other browser
+    await writeToSyncFile();
+    setFileSyncStatus('Sync folder set. Settings will sync automatically.', 'ok');
+  } catch (e) {
+    if (e.name !== 'AbortError') {
+      setFileSyncStatus('Could not set sync folder: ' + e.message, 'error');
+    }
+  }
+}
+
+async function writeToSyncFile() {
+  if (!syncDirHandle) return;
+  try {
+    // Re-verify permission is still granted (required after browser restart)
+    const perm = await syncDirHandle.requestPermission({ mode: 'readwrite' });
+    if (perm !== 'granted') return;
+
+    const data = await SilentSendSync._getAllData();
+    const fileHandle = await syncDirHandle.getFileHandle(SYNC_FILE_NAME, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(JSON.stringify(data, null, 2));
+    await writable.close();
+  } catch (e) {
+    // Permission denied or folder removed — don't spam errors
+    console.warn('[Silent Send] writeToSyncFile failed:', e.message);
+  }
+}
+
+async function checkFileSyncUpdate() {
+  if (!syncDirHandle) return;
+  try {
+    const perm = await syncDirHandle.queryPermission({ mode: 'readwrite' });
+    if (perm === 'prompt') {
+      // Need a user gesture to re-request — skip silently
+      return;
+    }
+    if (perm !== 'granted') return;
+
+    const fileHandle = await syncDirHandle.getFileHandle(SYNC_FILE_NAME);
+    const file = await fileHandle.getFile();
+    const data = JSON.parse(await file.text());
+
+    if (!data.version || !data.lastModified) return;
+
+    const local = await SilentSendSync._getAllData();
+    if (data.lastModified > (local.lastModified || 0)) {
+      await SilentSendSync._applyData(data, 'file');
+      mappings = await Storage.getMappings();
+      settings = await Storage.getSettings();
+      $('#browserSync').checked = settings.browserSync === true;
+      renderMappings();
+      renderDomains();
+      renderLog();
+      setFileSyncStatus(
+        'Auto-synced from folder (' + new Date(data.lastModified).toLocaleString() + ').',
+        'ok'
+      );
+    }
+  } catch (e) {
+    if (e.name !== 'NotFoundError') {
+      console.warn('[Silent Send] checkFileSyncUpdate failed:', e.message);
+    }
+  }
+}
+
+function updateFileSyncUI() {
+  const nameEl = $('#syncFolderName');
+  const clearBtn = $('#btnClearSyncFolder');
+  const pickBtn = $('#btnPickSyncFolder');
+  if (!nameEl) return;
+  if (syncDirHandle) {
+    nameEl.textContent = syncDirHandle.name + '/';
+    clearBtn.style.display = '';
+    pickBtn.textContent = 'Change Folder';
+  } else {
+    nameEl.textContent = '';
+    clearBtn.style.display = 'none';
+    pickBtn.textContent = 'Choose Sync Folder';
+  }
+}
+
+function setFileSyncStatus(msg, type) {
+  const el = $('#fileSyncStatus');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = type === 'ok' ? '#10b981' : type === 'warn' ? '#f59e0b' : type === 'error' ? '#dc2626' : '#6b7280';
+}
+
+function setGistSyncStatus(msg, type) {
+  const el = $('#gistSyncStatus');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = type === 'ok' ? '#10b981' : type === 'warn' ? '#f59e0b' : type === 'error' ? '#dc2626' : '#6b7280';
+}
+
+function setUrlSyncStatus(msg, type) {
+  const el = $('#urlSyncStatus');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = type === 'ok' ? '#10b981' : type === 'warn' ? '#f59e0b' : type === 'error' ? '#dc2626' : '#6b7280';
+}
+
+function parseHeadersField(val) {
+  if (!val || !val.trim()) return {};
+  try {
+    return JSON.parse(val.trim());
+  } catch {
+    return {};
+  }
 }
 
 function setSyncStatus(msg, type) {

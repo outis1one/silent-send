@@ -848,9 +848,16 @@
         }
 
         if (result.replacements.length > 0 && !result.skipped) {
-          // Use the substituted file
-          const newFile = new File([result.file], result.filename || value.name, {
-            type: result.file.type || value.type,
+          let uploadFile = result.file;
+
+          // If preview was shown and confirmed, and we have a _zip,
+          // build the final ZIP now
+          if (result._zip && result._modified) {
+            uploadFile = writeZipFile(result._zip);
+          }
+
+          const newFile = new File([uploadFile], result.filename || value.name, {
+            type: uploadFile.type || value.type,
           });
           newFormData.append(key, newFile);
           allReplacements.push(...result.replacements);
@@ -937,28 +944,80 @@
       }
     }
 
-    // DOCX/XLSX — not supported in page world without libraries
-    // For now, extract what text we can and warn
+    // DOCX/XLSX — full in-place replacement via ZIP rewrite
     if (isDOCX || isXLSX) {
       try {
-        const text = await extractZipXMLText(file);
-        if (!text) return { file, filename, replacements: [], skipped: true };
-        const result = substituteAll(text);
-        const preview = {
-          format: ext, replacementCount: result.replacements.length,
-          replacements: result.replacements.slice(0, 15),
-          note: isDOCX ? 'Text in document will be substituted' : 'Cell values will be substituted',
-        };
-        if (options.previewMode && result.replacements.length > 0) {
-          return { file, filename, replacements: result.replacements, preview };
+        const zip = await readZipFile(file);
+        let totalReplacements = [];
+        let modified = false;
+
+        // Identify XML files containing text
+        const targetFiles = isDOCX
+          ? Object.keys(zip.entries).filter(name =>
+              /^word\/(document|header\d*|footer\d*|comments|endnotes|footnotes)\.xml$/.test(name))
+          : Object.keys(zip.entries).filter(name =>
+              name === 'xl/sharedStrings.xml' ||
+              /^xl\/worksheets\/sheet\d+\.xml$/.test(name));
+
+        for (const xmlPath of targetFiles) {
+          const entry = zip.entries[xmlPath];
+          if (!entry) continue;
+
+          let xmlContent;
+          try {
+            let data = entry.rawData;
+            if (entry.compMethod === 8) {
+              data = await inflateData(data);
+              if (!data) continue;
+            }
+            xmlContent = new TextDecoder('utf-8').decode(data);
+          } catch { continue; }
+
+          // Substitute text between XML tags, preserving tags
+          const { xml: newXml, replacements } = substituteInXML(xmlContent);
+
+          if (replacements.length > 0) {
+            zip.entries[xmlPath] = {
+              ...entry,
+              _modified: true,
+              _newData: new TextEncoder().encode(newXml),
+            };
+            totalReplacements.push(...replacements);
+            modified = true;
+          }
         }
-        // For actual replacement, we'd need full ZIP rewrite
-        // For now, warn about the PPI found
-        if (result.modified) {
-          return { file, filename, replacements: result.replacements, preview };
+
+        if (!modified && !options.previewMode) {
+          return { file, filename, replacements: [] };
+        }
+
+        const preview = {
+          format: ext,
+          replacementCount: totalReplacements.length,
+          replacements: totalReplacements.slice(0, 15),
+          note: isDOCX
+            ? 'Text in document body, headers, and footers will be substituted. Formatting preserved.'
+            : 'Cell values and shared strings will be substituted. Formatting and formulas preserved.',
+        };
+
+        if (options.previewMode && totalReplacements.length > 0) {
+          // Return preview first — actual replacement happens after user confirms
+          return { file, filename, replacements: totalReplacements, preview,
+            _zip: zip, _modified: modified };
+        }
+
+        if (modified) {
+          const newBlob = writeZipFile(zip);
+          return {
+            file: newBlob,
+            filename,
+            replacements: totalReplacements,
+            preview,
+          };
         }
         return { file, filename, replacements: [] };
       } catch (e) {
+        console.warn('[Silent Send] DOCX/XLSX processing failed:', e);
         return { file, filename, replacements: [], skipped: true, reason: e.message };
       }
     }
@@ -993,30 +1052,170 @@
     return texts.join('\n');
   }
 
-  /**
-   * Extract text from DOCX/XLSX XML entries.
-   */
-  async function extractZipXMLText(file) {
-    // Minimal: read the file as text and find XML text content
-    // This is a rough extraction — better than nothing
-    try {
-      const buffer = await file.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      const str = new TextDecoder('latin1').decode(bytes);
-      // Find text between XML tags
-      const texts = [];
-      const re = />([^<]{3,})</g;
-      let m;
-      while ((m = re.exec(str)) !== null) {
-        const text = m[1].trim();
-        if (text && !/^[\x00-\x1f\x80-\xff]+$/.test(text)) {
-          texts.push(text);
-        }
+  // ============================================================
+  // ZIP Read/Write — inline for page world (no module imports)
+  // Handles DOCX (ZIP of XML) and XLSX (ZIP of XML) files.
+  // ============================================================
+
+  async function readZipFile(file) {
+    const buffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    const entries = {};
+
+    // Find end of central directory
+    let eocdOff = -1;
+    for (let i = bytes.length - 22; i >= 0; i--) {
+      if (bytes[i] === 0x50 && bytes[i+1] === 0x4b &&
+          bytes[i+2] === 0x05 && bytes[i+3] === 0x06) {
+        eocdOff = i; break;
       }
-      return texts.join(' ');
-    } catch {
-      return '';
     }
+    if (eocdOff === -1) throw new Error('Not a valid ZIP');
+
+    const dv = new DataView(buffer);
+    const cdOff = dv.getUint32(eocdOff + 16, true);
+    const cdCount = dv.getUint16(eocdOff + 10, true);
+
+    let off = cdOff;
+    for (let i = 0; i < cdCount; i++) {
+      if (dv.getUint32(off, true) !== 0x02014b50) break;
+      const compMethod = dv.getUint16(off + 10, true);
+      const crc32 = dv.getUint32(off + 16, true);
+      const compSize = dv.getUint32(off + 20, true);
+      const uncompSize = dv.getUint32(off + 24, true);
+      const nameLen = dv.getUint16(off + 28, true);
+      const extraLen = dv.getUint16(off + 30, true);
+      const commentLen = dv.getUint16(off + 32, true);
+      const localOff = dv.getUint32(off + 42, true);
+      const name = new TextDecoder().decode(bytes.slice(off + 46, off + 46 + nameLen));
+
+      const lNameLen = dv.getUint16(localOff + 26, true);
+      const lExtraLen = dv.getUint16(localOff + 28, true);
+      const dataOff = localOff + 30 + lNameLen + lExtraLen;
+
+      entries[name] = {
+        compMethod, crc32, compSize, uncompSize,
+        rawData: bytes.slice(dataOff, dataOff + compSize),
+      };
+
+      off += 46 + nameLen + extraLen + commentLen;
+    }
+
+    return { entries, _buffer: buffer };
+  }
+
+  function writeZipFile(zip) {
+    const parts = [];
+    const cdEntries = [];
+    let offset = 0;
+
+    for (const [name, entry] of Object.entries(zip.entries)) {
+      const nameBytes = new TextEncoder().encode(name);
+      let data;
+      let compMethod;
+
+      if (entry._modified && entry._newData) {
+        // Modified — store uncompressed
+        data = entry._newData;
+        compMethod = 0; // stored
+      } else {
+        // Unmodified — keep original
+        data = entry.rawData;
+        compMethod = entry.compMethod;
+      }
+
+      const uncompSize = entry._modified ? data.length : entry.uncompSize;
+      const compSize = data.length;
+
+      // Local file header (30 + name)
+      const lh = new Uint8Array(30 + nameBytes.length);
+      const lv = new DataView(lh.buffer);
+      lv.setUint32(0, 0x04034b50, true);
+      lv.setUint16(4, 20, true);
+      lv.setUint16(8, compMethod, true);
+      lv.setUint32(18, compSize, true);
+      lv.setUint32(22, uncompSize, true);
+      lv.setUint16(26, nameBytes.length, true);
+      lh.set(nameBytes, 30);
+
+      // Central directory entry (46 + name)
+      const cd = new Uint8Array(46 + nameBytes.length);
+      const cv = new DataView(cd.buffer);
+      cv.setUint32(0, 0x02014b50, true);
+      cv.setUint16(4, 20, true);
+      cv.setUint16(6, 20, true);
+      cv.setUint16(10, compMethod, true);
+      cv.setUint32(20, compSize, true);
+      cv.setUint32(24, uncompSize, true);
+      cv.setUint16(28, nameBytes.length, true);
+      cv.setUint32(42, offset, true);
+      cd.set(nameBytes, 46);
+
+      cdEntries.push(cd);
+      parts.push(lh, data);
+      offset += lh.length + data.length;
+    }
+
+    const cdStart = offset;
+    let cdSize = 0;
+    for (const cd of cdEntries) {
+      parts.push(cd);
+      cdSize += cd.length;
+    }
+
+    const eocd = new Uint8Array(22);
+    const ev = new DataView(eocd.buffer);
+    ev.setUint32(0, 0x06054b50, true);
+    ev.setUint16(8, cdEntries.length, true);
+    ev.setUint16(10, cdEntries.length, true);
+    ev.setUint32(12, cdSize, true);
+    ev.setUint32(16, cdStart, true);
+    parts.push(eocd);
+
+    return new Blob(parts, { type: 'application/octet-stream' });
+  }
+
+  /**
+   * Decompress DEFLATE data using DecompressionStream API.
+   */
+  async function inflateData(data) {
+    if (typeof DecompressionStream === 'undefined') return null;
+    try {
+      const ds = new DecompressionStream('deflate');
+      const writer = ds.writable.getWriter();
+      const reader = ds.readable.getReader();
+      writer.write(data);
+      writer.close();
+      const chunks = [];
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+      }
+      const total = chunks.reduce((s, c) => s + c.length, 0);
+      const result = new Uint8Array(total);
+      let pos = 0;
+      for (const c of chunks) { result.set(c, pos); pos += c.length; }
+      return result;
+    } catch { return null; }
+  }
+
+  /**
+   * Find text between XML tags and apply substitution.
+   * Preserves all XML structure — only modifies text content.
+   */
+  function substituteInXML(xml) {
+    const allReplacements = [];
+    const newXml = xml.replace(/>([^<]+)</g, (match, textContent) => {
+      if (!textContent || textContent.trim().length < 2) return match;
+      const result = substituteAll(textContent);
+      if (result.modified) {
+        allReplacements.push(...result.replacements);
+        return '>' + result.text + '<';
+      }
+      return match;
+    });
+    return { xml: newXml, replacements: allReplacements };
   }
 
   // ============================================================

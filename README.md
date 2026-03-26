@@ -146,7 +146,7 @@ Save and close the file.
 npm run sign:firefox
 ```
 
-The sign script reads your `.env` file automatically — no need to `source` it.
+The sign script reads your `.env` file automatically — no need to `source` it. First-time signing can take **1-5 minutes** while Mozilla validates and approves the extension. Subsequent signs are usually faster. When done, you'll find a signed `.xpi` file in `dist/firefox-signed/`.
 
 **Windows (Command Prompt — if not using Git Bash):**
 ```cmd
@@ -159,7 +159,6 @@ Get-Content .env | ForEach-Object { if ($_ -match '^(.+?)=(.*)$') { [Environment
 npm run sign:firefox
 ```
 
-This submits the extension to Mozilla for signing (takes 10-30 seconds). When done, you'll find a signed `.xpi` file in `dist/firefox-signed/`.
 
 #### Step 5: Install
 

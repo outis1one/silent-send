@@ -218,15 +218,14 @@ const AutoDetect = {
    */
   _detectProperNouns(text, configured) {
     const findings = [];
-    const re = /(?:^|[.!?\n]\s*)?([A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})*)/g;
+    // Only match TWO OR MORE consecutive capitalized words
+    // Single capitalized words cause too many false positives (sentence starts)
+    const re = /\b([A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})+)\b/g;
     let m;
 
     while ((m = re.exec(text)) !== null) {
       const fullMatch = m[1];
       if (!fullMatch) continue;
-
-      const before = text.slice(Math.max(0, m.index - 2), m.index);
-      const isSentenceStart = m.index === 0 || /[.!?\n]\s*$/.test(before);
 
       const words = fullMatch.split(/\s+/);
       const properWords = words.filter(w =>
@@ -235,15 +234,14 @@ const AutoDetect = {
         !configured.has(w.toLowerCase())
       );
 
-      if (properWords.length === 0) continue;
-      if (isSentenceStart && properWords.length === 1 && words.length === 1) continue;
+      if (properWords.length < 2) continue; // need at least 2 proper words
 
       const value = properWords.join(' ');
-      if (value.length >= 3 && !configured.has(value.toLowerCase())) {
+      if (value.length >= 5 && !configured.has(value.toLowerCase())) {
         findings.push({
           name: 'Possible Name/Org',
           value,
-          hint: 'Capitalized word — could be a name, company, or project',
+          hint: 'Capitalized phrase — could be a name, company, or project',
           category: 'name',
         });
       }

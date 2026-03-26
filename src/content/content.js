@@ -400,48 +400,42 @@
   /**
    * Detect proper nouns (potential names, company names, project names)
    * that aren't configured in identity. Uses capitalization heuristics:
-   * - Capitalized words not at the start of a sentence
-   * - Multi-word capitalized sequences (e.g. "Acme Corp", "Project Atlas")
+   * - ONLY multi-word capitalized sequences (e.g. "Acme Corp", "Project Atlas")
+   * - Single capitalized words are too noisy — every sentence starts with one
    * - Filters out common English words and programming terms
    */
   function detectProperNouns(text, configured) {
     const findings = [];
-    // Match capitalized words that aren't at the very start of the text
-    // and aren't after a period/newline (sentence start)
-    const re = /(?:^|[.!?\n]\s*)?([A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})*)/g;
+    // Only match TWO OR MORE consecutive capitalized words
+    // Single capitalized words cause too many false positives
+    const re = /\b([A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})+)\b/g;
     let m;
 
     while ((m = re.exec(text)) !== null) {
       const fullMatch = m[1];
       if (!fullMatch) continue;
 
-      // Check if this is at the start of a sentence
-      const before = text.slice(Math.max(0, m.index - 2), m.index);
-      const isSentenceStart = m.index === 0 || /[.!?\n]\s*$/.test(before);
-
-      // Split into individual words and check each
+      // Split into individual words and filter common ones
       const words = fullMatch.split(/\s+/);
       const properWords = words.filter(w =>
         w.length >= 3 &&
         !COMMON_CAPITALIZED.has(w.toLowerCase()) &&
-        !configured.has(w.toLowerCase())
+        !configured.has(w.toLowerCase()) &&
+        !ignoredValues.has(w.toLowerCase())
       );
 
-      if (properWords.length === 0) continue;
+      if (properWords.length < 2) continue; // need at least 2 proper words
 
-      // Single capitalized word at sentence start = likely not a proper noun
-      if (isSentenceStart && properWords.length === 1 && words.length === 1) continue;
-
-      // Multi-word capitalized sequence is likely a proper noun
-      // Single capitalized word mid-sentence is likely a proper noun
       const value = properWords.join(' ');
-      if (value.length >= 3 && !configured.has(value.toLowerCase())) {
+      if (value.length >= 5 && !configured.has(value.toLowerCase()) && !ignoredValues.has(value.toLowerCase())) {
         findings.push({
           name: 'Possible Name/Org',
           value,
-          hint: 'Capitalized word — could be a name, company, or project',
+          hint: 'Capitalized phrase — could be a name, company, or project',
           category: 'name',
         });
+      }
+    }
       }
     }
 
@@ -477,6 +471,7 @@
       while ((m = pat.re.exec(text)) !== null) {
         const val = m[0];
         if (configured.has(val.toLowerCase())) continue;
+        if (ignoredValues.has(val.toLowerCase())) continue;
         if (pat.skip && pat.skip.test(val)) continue;
         findings.push({ name: pat.name, value: val, hint: pat.hint, category: pat.cat });
       }
@@ -629,6 +624,30 @@
   // preventing false positives like "user" in AI prose.
   // ============================================================
   const sessionSubstitutions = new Map();
+
+  // Values the user has explicitly ignored via the "Ignore" button.
+  // Persisted to storage so they stay dismissed across page reloads.
+  const ignoredValues = new Set();
+
+  // Load ignored values from storage
+  (async () => {
+    const stored = await getStorageData('ss_ignored_ppi');
+    if (Array.isArray(stored)) {
+      for (const v of stored) ignoredValues.add(v.toLowerCase());
+    }
+  })();
+
+  function addIgnoredValue(value) {
+    ignoredValues.add(value.toLowerCase());
+    // Persist
+    getStorageData('ss_ignored_ppi').then(stored => {
+      const list = Array.isArray(stored) ? stored : [];
+      if (!list.includes(value.toLowerCase())) {
+        list.push(value.toLowerCase());
+        setStorageData('ss_ignored_ppi', list);
+      }
+    });
+  }
 
   // ============================================================
   // Notify content script of substitutions (for badge + logging)
@@ -1318,12 +1337,16 @@
   function revealInElement(el) {
     if (SKIP_REVEAL_TAGS.has(el.tagName)) return;
     if (el.classList?.contains('ss-reveal-badge')) return;
+    // Never touch contenteditable elements (chat input boxes)
+    if (el.isContentEditable) return;
 
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
         const parent = node.parentElement;
         if (parent && SKIP_REVEAL_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
         if (parent?.closest?.('.ss-autodetect-warning, .ss-presend-warning, .ss-reveal-badge')) return NodeFilter.FILTER_REJECT;
+        // Skip contenteditable areas (chat input)
+        if (parent?.closest?.('[contenteditable="true"]')) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }
     });
@@ -1346,8 +1369,15 @@
 
   function unrevealInElement(el) {
     if (SKIP_REVEAL_TAGS.has(el.tagName)) return;
+    if (el.isContentEditable) return;
 
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const parent = node.parentElement;
+        if (parent?.closest?.('[contenteditable="true"]')) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
     let textNode;
     while ((textNode = walker.nextNode())) {
       const original = originalTexts.get(textNode);
@@ -1374,6 +1404,7 @@
         const parent = node.parentElement;
         if (parent && SKIP_REVEAL_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
         if (parent?.closest?.('.ss-autodetect-warning, .ss-presend-warning, .ss-reveal-badge')) return NodeFilter.FILTER_REJECT;
+        if (parent?.closest?.('[contenteditable="true"]')) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }
     });
@@ -1454,10 +1485,16 @@
           // Only do text replacement in reveal mode
           if (settings.revealMode) {
             if (node.nodeType === Node.ELEMENT_NODE) {
-              if (!SKIP_REVEAL_TAGS.has(node.tagName)) {
+              // Skip contenteditable (chat input) and skipped tags
+              if (!SKIP_REVEAL_TAGS.has(node.tagName) &&
+                  !node.isContentEditable &&
+                  !node.closest?.('[contenteditable="true"]')) {
                 revealInElement(node);
               }
             } else if (node.nodeType === Node.TEXT_NODE) {
+              // Skip text nodes inside contenteditable
+              const parent = node.parentElement;
+              if (parent?.closest?.('[contenteditable="true"]')) continue;
               const text = node.textContent;
               if (text && text.length >= MIN_STRING_LENGTH) {
                 if (!originalTexts.has(node)) {
@@ -1479,6 +1516,8 @@
             const text = mutation.target.textContent;
             if (text && text.length >= MIN_STRING_LENGTH) {
               const parent = mutation.target.parentElement;
+              // Skip contenteditable (chat input)
+              if (parent?.closest?.('[contenteditable="true"]')) continue;
               if (parent && !SKIP_REVEAL_TAGS.has(parent.tagName)) {
                 if (!originalTexts.has(mutation.target)) {
                   originalTexts.set(mutation.target, text);
@@ -1612,6 +1651,7 @@
         ${settings.autoAddDetected !== false
           ? `<button class="ss-ps-add" data-real="${encodeURIComponent(w.value)}" data-fake="${encodeURIComponent(fake)}" data-cat="${w.category}" title="Add mapping: ${displayVal} → ${fake}">+</button>`
           : ''}
+        <button class="ss-ps-ignore" data-value="${encodeURIComponent(w.value)}" title="Never flag this value again">ignore</button>
       </div>`;
     }).join('');
 
@@ -1672,6 +1712,24 @@
         btn.textContent = '\u2714';
         btn.style.color = '#4ade80';
         btn.disabled = true;
+      });
+    });
+
+    // Ignore buttons
+    preSendWarningEl.querySelectorAll('.ss-ps-ignore').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const value = decodeURIComponent(btn.dataset.value);
+        addIgnoredValue(value);
+
+        // Remove this item's row
+        const row = btn.closest('.ss-ps-item');
+        if (row) row.remove();
+
+        // Re-scan to update warning
+        if (inputEl) {
+          if (inputScanTimer) clearTimeout(inputScanTimer);
+          inputScanTimer = setTimeout(() => scanInputForPPI(inputEl), 150);
+        }
       });
     });
   }

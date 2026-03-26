@@ -220,6 +220,20 @@
 .ss-ps-add:hover { background: rgba(74, 222, 128, 0.15); }
 .ss-ps-add:disabled { border-color: #333; cursor: default; }
 
+.ss-ps-ignore {
+  background: none;
+  border: none;
+  color: #6b7280;
+  font-size: 9px;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 2px 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ss-ps-ignore:hover { color: #e5e7eb; text-decoration: underline; }
+
 /* Floating reveal mode indicator */
 .ss-reveal-badge {
   position: fixed;

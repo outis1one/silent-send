@@ -24,7 +24,11 @@ const KEYS = {
 };
 
 // Keys that contain sensitive PPI and should be encrypted at rest
-const ENCRYPTED_KEYS = new Set([KEYS.MAPPINGS, KEYS.IDENTITY, KEYS.LOG]);
+// All user data keys are encrypted at rest — settings included since
+// custom domains and configuration can reveal what services the user
+// accesses. Only ss_sync_encryption (salt, verification blob) and
+// ss_lastModified stay plaintext for bootstrap purposes.
+const ENCRYPTED_KEYS = new Set([KEYS.MAPPINGS, KEYS.IDENTITY, KEYS.LOG, KEYS.SETTINGS]);
 
 const DEFAULT_SETTINGS = {
   enabled: true,
@@ -325,20 +329,22 @@ const Storage = {
   },
 
   // --- Settings ---
-  // Settings are NOT encrypted — they contain no PPI and are needed
-  // for the extension to show basic UI (locked state, badge, etc.)
+  // Settings are encrypted at rest (custom domains can reveal which
+  // private AI services the user accesses). When locked, defaults are
+  // returned so the extension can show basic UI.
 
   async getSettings() {
-    const result = await api.storage.local.get(KEYS.SETTINGS);
-    return { ...DEFAULT_SETTINGS, ...(result[KEYS.SETTINGS] || {}) };
+    const data = await this._readSecure(KEYS.SETTINGS);
+    return { ...DEFAULT_SETTINGS, ...(data || {}) };
   },
 
   async saveSettings(settings) {
     const current = await this.getSettings();
-    await api.storage.local.set({
-      [KEYS.SETTINGS]: { ...current, ...settings },
-      ss_lastModified: Date.now(),
-    });
+    await this._writeSecure(
+      KEYS.SETTINGS,
+      { ...current, ...settings },
+      { ss_lastModified: Date.now() },
+    );
   },
 };
 

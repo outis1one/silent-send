@@ -79,12 +79,14 @@ You can create multiple profiles (Personal, Work, Spouse) using the dropdown at 
 
 ### Icon colors
 
-| Icon color | Meaning |
-|-----------|---------|
-| **Gray** | Not configured — does nothing until you set up your identity |
-| **Black** | Active and protecting |
-| **Blue** | Reveal mode on — showing your real data in AI responses |
-| **Red** | Manually disabled |
+| Icon color | Badge | Meaning |
+|-----------|-------|---------|
+| **Gray** | | Not configured — does nothing until you set up your identity |
+| **Black** | | Active and protecting |
+| **Blue** | | Reveal mode on — showing your real data in AI responses |
+| **Red** | | Manually disabled |
+| Any | **LOCK** (red) | Vault locked — encrypted data, needs password to unlock |
+| Any | **SYN** (purple) | New settings synced from another device |
 
 ### Reveal mode
 
@@ -261,16 +263,68 @@ src/
     substitution-engine.js — Core explicit find/replace logic
     smart-patterns.js   — Auto-detection of emails, names, usernames, hostnames, phones, paths
     secret-scanner.js   — Auto-detection of API keys, tokens, passwords, SSNs, credit cards
-    storage.js          — Browser storage wrapper
+    crypto.js           — AES-256-GCM encryption, PBKDF2 key derivation, TOTP (RFC 6238), WebAuthn, key caching
+    sync.js             — Cross-browser sync with encryption (browser sync, Gist, folder, URL, sync codes)
+    storage.js          — Browser storage wrapper with transparent at-rest encryption
     browser-polyfill.js — Chrome/Firefox API compatibility
 ```
 
-## Privacy
+## Privacy & Security
 
-- All data stays local in browser storage
-- No external servers, no telemetry, no analytics
+- All data stays local in browser storage — no external servers, no telemetry, no analytics
 - The extension only activates on supported AI sites (and any custom domains you add)
 - Your real identity data never leaves your machine
+
+### At-rest encryption
+
+When you enable **sync encryption** (Options → Sync Between Browsers → Sync Encryption), all sensitive data is AES-256-GCM encrypted before being written to browser storage:
+
+| What's encrypted | Contains |
+|---|---|
+| Identity profiles | Real names, emails, usernames, hostnames, phones + substitutes |
+| Mappings | All real → substitute pairs |
+| Activity log | History of what was substituted |
+| Settings | Custom domains, configuration preferences |
+| TOTP secret | Authenticator app shared secret |
+| All sync data | Everything sent to Gist, sync folders, custom URLs, browser sync |
+
+**Only two things remain plaintext** — the encryption salt (needed to derive the key) and a verification blob (needed to check the password). Neither contains PPI.
+
+Without at-rest encryption, data is stored in plaintext in the browser's local storage (similar to cookies and localStorage). Anyone with file system access to your browser profile directory could read it.
+
+### Vault unlock
+
+After a browser restart, the extension is in a **locked** state:
+
+1. Badge shows **LOCK** in red — substitutions are paused
+2. Click the extension icon to see the unlock prompt
+3. Enter your password (first time per device), or use biometric/TOTP for re-verification
+4. Protection resumes immediately across all open tabs
+
+This is similar to how password managers work — your vault is locked until you authenticate.
+
+### Authentication options
+
+| Method | When it's used |
+|---|---|
+| **Password** | Required once per device to derive the encryption key. The key is then cached indefinitely in IndexedDB. |
+| **TOTP** | Optional second factor alongside password. Can also be used alone for re-verification after the key is cached. |
+| **WebAuthn (biometric/PIN)** | Primary re-verification method after first setup. Uses fingerprint, Face ID, or Windows Hello. |
+
+Re-verification (biometric, TOTP, or password) is only triggered when the configurable TTL expires (default: 90 days) **and** new sync data exists. If nothing changed, you're never prompted.
+
+### Cross-device sync encryption
+
+All sync channels (browser sync, GitHub Gist, folder sync, custom URL, sync codes) encrypt data before sending. A new device bootstraps itself from the encrypted sync payload:
+
+1. Pull encrypted data from any sync channel
+2. Enter the same password used on the original device (once)
+3. Full configuration (including TOTP secret) is restored from the encrypted payload
+4. WebAuthn credential is registered locally for future re-verification
+
+### Smart reveal
+
+Reveal mode only replaces values that were **actually substituted** in outbound messages during the current session. If the AI uses a word that happens to match one of your substitute values (e.g., the AI says "the user should..." and "user" is a configured substitute), it won't be falsely revealed as your real username.
 
 ## Disclaimer
 

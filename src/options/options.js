@@ -14,6 +14,12 @@ let passwordsRevealed = false;
 
 const $ = (sel) => document.querySelector(sel);
 
+// --- Safe innerHTML replacement (AMO-compliant) ---
+function safeHTML(el, html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  el.replaceChildren(...doc.body.childNodes);
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   mappings = await Storage.getMappings();
   settings = await Storage.getSettings();
@@ -405,11 +411,11 @@ function renderMappings() {
   const nonPasswordMappings = mappings.filter(m => m.category !== 'password');
 
   if (nonPasswordMappings.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:24px">No mappings configured</td></tr>';
+    safeHTML(tbody, '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:24px">No mappings configured</td></tr>');
     return;
   }
 
-  tbody.innerHTML = nonPasswordMappings
+  safeHTML(tbody, nonPasswordMappings
     .map(
       (m) => `
     <tr data-id="${m.id}">
@@ -427,7 +433,7 @@ function renderMappings() {
     </tr>
   `
     )
-    .join('');
+    .join(''));
 
   // Bind
   tbody.querySelectorAll('.btn-delete').forEach((btn) => {
@@ -457,14 +463,14 @@ function renderPasswords() {
   const noMsg = $('#noPasswordsMsg');
 
   if (passwordMappings.length === 0) {
-    tbody.innerHTML = '';
+    tbody.replaceChildren();
     noMsg.style.display = 'block';
     return;
   }
 
   noMsg.style.display = 'none';
 
-  tbody.innerHTML = passwordMappings.map(m => {
+  safeHTML(tbody, passwordMappings.map(m => {
     const displayReal = passwordsRevealed
       ? escapeHtml(m.real)
       : '&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;';
@@ -481,7 +487,7 @@ function renderPasswords() {
       </td>
       <td><button class="btn btn-sm btn-danger btn-delete-pw">&times;</button></td>
     </tr>`;
-  }).join('');
+  }).join(''));
 
   // Bind delete
   tbody.querySelectorAll('.btn-delete-pw').forEach(btn => {
@@ -518,11 +524,11 @@ async function renderLog() {
 
   const list = $('#logList');
   if (log.length === 0) {
-    list.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:24px">No activity logged</div>';
+    safeHTML(list, '<div style="text-align:center;color:#9ca3af;padding:24px">No activity logged</div>');
     return;
   }
 
-  list.innerHTML = log
+  safeHTML(list, log
     .slice(0, 100)
     .map((entry) => {
       const time = new Date(entry.timestamp).toLocaleString();
@@ -535,7 +541,7 @@ async function renderLog() {
       </div>
     `;
     })
-    .join('');
+    .join(''));
 }
 
 // --- Custom Domains ---
@@ -582,18 +588,18 @@ function renderDomains() {
   const domains = settings.customDomains || [];
 
   if (domains.length === 0) {
-    list.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:12px;font-size:13px">No custom domains. Built-in sites (Claude, ChatGPT, Grok, Gemini, localhost) are always active.</div>';
+    safeHTML(list, '<div style="text-align:center;color:#9ca3af;padding:12px;font-size:13px">No custom domains. Built-in sites (Claude, ChatGPT, Grok, Gemini, localhost) are always active.</div>');
     return;
   }
 
-  list.innerHTML = domains
+  safeHTML(list, domains
     .map((d, i) => `
       <div class="domain-item" style="display:flex;align-items:center;justify-content:space-between;padding:8px;background:#f9fafb;border-radius:6px;margin-bottom:4px">
         <span style="font-size:13px;font-family:monospace">${escapeHtml(d)}</span>
         <button class="btn btn-sm btn-danger btn-remove-domain" data-index="${i}">&times;</button>
       </div>
     `)
-    .join('');
+    .join(''));
 
   list.querySelectorAll('.btn-remove-domain').forEach((btn) => {
     btn.addEventListener('click', async () => {
@@ -1239,11 +1245,11 @@ async function renderVersionHistory() {
   const snapshots = await VersionHistory.getSnapshots();
 
   if (snapshots.length === 0) {
-    list.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:12px">No snapshots yet. Snapshots are created on each sync.</div>';
+    safeHTML(list, '<div style="text-align:center;color:#9ca3af;padding:12px">No snapshots yet. Snapshots are created on each sync.</div>');
     return;
   }
 
-  list.innerHTML = snapshots.map(s => {
+  safeHTML(list, snapshots.map(s => {
     const time = new Date(s.timestamp).toLocaleString();
     const mappingCount = (s.data?.mappings || []).length;
     return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px;background:#f9fafb;border-radius:6px;margin-bottom:4px">
@@ -1254,7 +1260,7 @@ async function renderVersionHistory() {
       </div>
       <button class="btn btn-sm btn-restore-snapshot" data-id="${s.id}">Restore</button>
     </div>`;
-  }).join('');
+  }).join(''));
 
   list.querySelectorAll('.btn-restore-snapshot').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -1299,13 +1305,13 @@ async function renderDevices() {
   const entries = Object.values(devices);
 
   if (entries.length === 0) {
-    list.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:12px">No devices synced yet. Push or pull to register this device.</div>';
+    safeHTML(list, '<div style="text-align:center;color:#9ca3af;padding:12px">No devices synced yet. Push or pull to register this device.</div>');
     return;
   }
 
   entries.sort((a, b) => (b.lastSync || 0) - (a.lastSync || 0));
 
-  list.innerHTML = `<table style="width:100%;font-size:12px;border-collapse:collapse">
+  safeHTML(list, `<table style="width:100%;font-size:12px;border-collapse:collapse">
     <thead><tr style="text-align:left;border-bottom:1px solid #e5e7eb">
       <th style="padding:6px">Device</th>
       <th style="padding:6px">Browser</th>
@@ -1322,7 +1328,7 @@ async function renderDevices() {
         <td style="padding:6px">${!isCurrent ? `<button class="btn btn-sm btn-danger btn-remove-device" data-id="${d.id}">&times;</button>` : ''}</td>
       </tr>`;
     }).join('')}</tbody>
-  </table>`;
+  </table>`);
 
   list.querySelectorAll('.btn-remove-device').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -1399,9 +1405,9 @@ async function showOrgJoined() {
   const compliance = await OrgPolicy.checkCompliance();
   const statusEl = $('#orgComplianceStatus');
   if (compliance.compliant) {
-    statusEl.innerHTML = '<span style="color:#10b981">&#10003; Compliant — all required fields configured</span>';
+    safeHTML(statusEl, '<span style="color:#10b981">&#10003; Compliant — all required fields configured</span>');
   } else {
-    statusEl.innerHTML = `<span style="color:#b45309">Missing: ${compliance.missing.join(', ')}</span>`;
+    safeHTML(statusEl, `<span style="color:#b45309">Missing: ${compliance.missing.join(', ')}</span>`);
   }
 
   const reqMappings = policy?.requiredMappings || [];
@@ -1553,7 +1559,7 @@ async function checkConflicts() {
 
 function renderConflicts(conflicts) {
   const list = $('#conflictList');
-  list.innerHTML = conflicts.map(c => `
+  safeHTML(list, conflicts.map(c => `
     <div style="padding:10px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;margin-bottom:8px" data-conflict-id="${c.id}">
       <div style="font-size:12px;font-weight:500;margin-bottom:6px">${escapeHtml(c.path)}</div>
       <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px">
@@ -1571,7 +1577,7 @@ function renderConflicts(conflicts) {
         <button class="btn btn-sm btn-resolve" data-id="${c.id}" data-choice="remote">Keep Remote</button>
       </div>
     </div>
-  `).join('');
+  `).join(''));
 
   list.querySelectorAll('.btn-resolve').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -1632,10 +1638,10 @@ async function handleBulkImport(e) {
       result.identity.usernames.filter(u => !u.substitute).length +
       result.identity.phones.filter(p => !p.substitute).length;
 
-    $('#bulkImportSummary').innerHTML = `
+    safeHTML($('#bulkImportSummary'), `
       Found: ${parts.join(', ')}.
       ${needsMapping > 0 ? `<span style="color:#b45309">${needsMapping} item(s) need substitutes — you can add them after import.</span>` : ''}
-    `;
+    `);
 
     // Build preview list
     const items = [];
@@ -1655,8 +1661,8 @@ async function handleBulkImport(e) {
       items.push(`<div><span style="color:#6b7280">${escapeHtml(m.category)}:</span> <strong>${escapeHtml(m.real)}</strong>${m.substitute ? ' → ' + escapeHtml(m.substitute) : ' <span style="color:#b45309">needs substitute</span>'}</div>`);
     }
 
-    $('#bulkImportItems').innerHTML = items.slice(0, 50).join('') +
-      (items.length > 50 ? `<div style="color:#6b7280;margin-top:4px">+${items.length - 50} more...</div>` : '');
+    safeHTML($('#bulkImportItems'), items.slice(0, 50).join('') +
+      (items.length > 50 ? `<div style="color:#6b7280;margin-top:4px">+${items.length - 50} more...</div>` : ''));
 
     $('#bulkImportPreview').style.display = 'block';
 

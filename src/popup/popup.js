@@ -18,6 +18,12 @@ let settings = {};
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
+// --- Safe innerHTML replacement (AMO-compliant) ---
+function safeHTML(el, html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  el.replaceChildren(...doc.body.childNodes);
+}
+
 // --- Init ---
 document.addEventListener('DOMContentLoaded', async () => {
   // Check if locked BEFORE trying to read sensitive data
@@ -302,11 +308,11 @@ async function showLockedUI() {
 // --- Profiles ---
 function renderProfileSelector() {
   const select = $('#profileSelect');
-  select.innerHTML = profiles.map(p =>
+  safeHTML(select, profiles.map(p =>
     `<option value="${p.id}" ${p.id === currentProfileId ? 'selected' : ''}>` +
     `${escapeHtml(p.name)}${p.active ? '' : ' (off)'}` +
     `</option>`
-  ).join('');
+  ).join(''));
 
   const profile = profiles.find(p => p.id === currentProfileId);
   $('#profileActive').checked = profile?.active ?? true;
@@ -355,7 +361,7 @@ function renderFieldList(fieldName, items) {
     items = [{ real: '', substitute: '', type: config.defaultType || '' }];
   }
 
-  container.innerHTML = items.map((item, i) => {
+  safeHTML(container, items.map((item, i) => {
     let typeHtml = '';
     if (config.typeOptions) {
       typeHtml = `<select class="id-type-select" data-index="${i}" style="padding:3px 2px;font-size:10px;border:1px solid #e5e7eb;border-radius:3px;width:42px">` +
@@ -371,7 +377,7 @@ function renderFieldList(fieldName, items) {
       <input type="text" class="input input-sm id-sub" value="${escapeAttr(item.substitute || '')}" placeholder="${config.placeholderSub}">
       <button class="btn-remove" title="Remove">&times;</button>
     </div>`;
-  }).join('');
+  }).join(''));
 
   // Bind remove buttons
   container.querySelectorAll('.btn-remove').forEach(btn => {
@@ -420,13 +426,13 @@ function loadIdentityForm() {
           ).join('') +
           `</select>`;
       }
-      tempDiv.innerHTML = `<div class="id-entry-row" data-index="${count}">
+      safeHTML(tempDiv, `<div class="id-entry-row" data-index="${count}">
         ${typeHtml}
         <input type="text" class="input input-sm id-real" placeholder="${config.placeholderReal}">
         <span class="arrow" style="font-size:12px">&rarr;</span>
         <input type="text" class="input input-sm id-sub" placeholder="${config.placeholderSub}">
         <button class="btn-remove" title="Remove">&times;</button>
-      </div>`;
+      </div>`);
       const row = tempDiv.firstElementChild;
       container.appendChild(row);
       row.querySelector('.btn-remove').addEventListener('click', () => {
@@ -576,11 +582,11 @@ function renderMappings() {
   const list = $('#mappingList');
 
   if (mappings.length === 0) {
-    list.innerHTML = '<div class="empty-state">No mappings yet. Add your first one above.</div>';
+    safeHTML(list, '<div class="empty-state">No mappings yet. Add your first one above.</div>');
     return;
   }
 
-  list.innerHTML = mappings
+  safeHTML(list, mappings
     .map(
       (m) => `
     <div class="mapping-item" data-id="${m.id}">
@@ -597,7 +603,7 @@ function renderMappings() {
     </div>
   `
     )
-    .join('');
+    .join(''));
 
   // Bind actions
   list.querySelectorAll('.btn-delete').forEach((btn) => {
@@ -631,11 +637,11 @@ async function renderActivity() {
   countEl.textContent = `${log.length} substitution${log.length !== 1 ? 's' : ''} logged`;
 
   if (log.length === 0) {
-    list.innerHTML = '<div class="empty-state">No activity yet.</div>';
+    safeHTML(list, '<div class="empty-state">No activity yet.</div>');
     return;
   }
 
-  list.innerHTML = log
+  safeHTML(list, log
     .slice(0, 50)
     .map((entry) => {
       const time = new Date(entry.timestamp).toLocaleTimeString([], {
@@ -653,7 +659,7 @@ async function renderActivity() {
       </div>
     `;
     })
-    .join('');
+    .join(''));
 }
 
 // --- Test Diff (Strip: real → fake) ---
@@ -663,7 +669,7 @@ function renderTestDiff() {
   const stats = $('#diffStats');
 
   if (!input) {
-    output.innerHTML = '';
+    output.replaceChildren();
     stats.textContent = '';
     return;
   }
@@ -703,7 +709,7 @@ function renderTestDiff() {
       `<span class="sub-highlight" style="background:#fee2e2;color:#dc2626" title="${escapeHtml(r.pattern)}">${escapedReplaced}</span>`
     );
   }
-  output.innerHTML = html;
+  safeHTML(output, html);
 
   const smartCount = smartResult.replacements.length;
   const explicitCount = explicitResult.replacements.length;
@@ -723,10 +729,12 @@ function renderTestDiff() {
 
   // Show PPI warnings below stats
   if (ppiWarnings.length > 0) {
-    stats.innerHTML += `<div style="margin-top:6px;padding:6px 8px;background:#fef3c7;border-radius:4px;color:#92400e;font-size:11px">
+    const ppiDiv = document.createElement('div');
+    safeHTML(ppiDiv, `<div style="margin-top:6px;padding:6px 8px;background:#fef3c7;border-radius:4px;color:#92400e;font-size:11px">
       <strong>Unconfigured PPI detected:</strong>
       ${ppiWarnings.map(w => `<div style="margin-top:3px"><code style="background:#fff;padding:1px 4px;border-radius:2px;color:#b45309">${escapeHtml(w.value)}</code> — ${w.hint}</div>`).join('')}
-    </div>`;
+    </div>`);
+    stats.appendChild(ppiDiv);
   }
 }
 
@@ -737,7 +745,7 @@ function renderRevealDiff() {
   const stats = $('#revealStats');
 
   if (!input) {
-    output.innerHTML = '';
+    output.replaceChildren();
     stats.textContent = '';
     return;
   }
@@ -783,7 +791,7 @@ function renderRevealDiff() {
       `<span class="sub-highlight" title="Was: ${escapeHtml(pair.substitute)}" style="background:#dbeafe;color:#1d4ed8">${escapedReal}</span>`
     );
   }
-  output.innerHTML = html;
+  safeHTML(output, html);
   stats.textContent = `${totalCount} value${totalCount !== 1 ? 's' : ''} revealed`;
 }
 

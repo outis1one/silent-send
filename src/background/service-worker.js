@@ -168,6 +168,68 @@ const messageHandlers = {
   },
 };
 
+// --- Keyboard Shortcuts ---
+api.commands.onCommand.addListener(async (command) => {
+  const settings = await Storage.getSettings();
+
+  if (command === 'toggle-reveal') {
+    settings.revealMode = !settings.revealMode;
+    await Storage.saveSettings({ revealMode: settings.revealMode });
+
+    // Broadcast to all tabs
+    broadcastSettings(settings);
+
+    // Show brief badge text
+    const [tab] = await api.tabs.query({ active: true, currentWindow: true });
+    if (tab) {
+      api.action.setBadgeText({ text: settings.revealMode ? 'EYE' : '', tabId: tab.id });
+      api.action.setBadgeBackgroundColor({
+        color: settings.revealMode ? '#1d4ed8' : '#6b7280',
+        tabId: tab.id,
+      });
+      if (!settings.revealMode) {
+        // Restore normal badge after a moment
+        setTimeout(() => updateBadge(tab.id), 1500);
+      }
+    }
+  }
+
+  if (command === 'toggle-enabled') {
+    settings.enabled = !settings.enabled;
+    await Storage.saveSettings({ enabled: settings.enabled });
+
+    broadcastSettings(settings);
+
+    // Flash badge
+    const [tab] = await api.tabs.query({ active: true, currentWindow: true });
+    if (tab) {
+      api.action.setBadgeText({ text: settings.enabled ? 'ON' : 'OFF', tabId: tab.id });
+      api.action.setBadgeBackgroundColor({
+        color: settings.enabled ? '#10b981' : '#dc2626',
+        tabId: tab.id,
+      });
+      setTimeout(() => updateBadge(tab.id), 1500);
+    }
+  }
+});
+
+async function broadcastSettings(settings) {
+  const allPatterns = [...BUILTIN_URL_PATTERNS];
+  const customDomains = settings.customDomains || [];
+  for (const domain of customDomains) {
+    allPatterns.push(domain + '/*');
+  }
+  for (const urlPattern of allPatterns) {
+    const tabs = await api.tabs.query({ url: urlPattern }).catch(() => []);
+    for (const tab of tabs) {
+      api.tabs.sendMessage(tab.id, {
+        type: 'settings:updated',
+        settings,
+      }).catch(() => {});
+    }
+  }
+}
+
 // --- Set initial badge state ---
 api.runtime.onInstalled.addListener(() => {
   api.action.setBadgeBackgroundColor({ color: '#6b7280' });

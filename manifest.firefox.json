@@ -63,6 +63,22 @@
     "48": "icons/icon48.svg",
     "128": "icons/icon128.svg"
   },
+  "commands": {
+    "toggle-reveal": {
+      "suggested_key": {
+        "default": "Alt+Shift+R",
+        "mac": "Alt+Shift+R"
+      },
+      "description": "Toggle Reveal Mode"
+    },
+    "toggle-enabled": {
+      "suggested_key": {
+        "default": "Alt+Shift+S",
+        "mac": "Alt+Shift+S"
+      },
+      "description": "Toggle Silent Send on/off"
+    }
+  },
   "optional_permissions": [
     "<all_urls>"
   ],

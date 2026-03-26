@@ -20,10 +20,12 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
-# --- Auto-bump patch version ---
-CURRENT_VERSION=$(grep -o '"version": "[^"]*"' "$MANIFEST" | head -1 | grep -o '[0-9.]*')
-IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-PATCH=$((PATCH + 1))
+# --- Auto-bump version — always unique ---
+# Format: MAJOR.YMMDD.HHMM (e.g., 1.60326.1542)
+# Each part stays under 65535, guaranteed unique per minute
+MAJOR=1
+MINOR=$(date +%-m%d)    # e.g., 326 for March 26, 1225 for Dec 25
+PATCH=$(date +%-H%M)    # e.g., 1542 for 3:42 PM
 NEW_VERSION="$MAJOR.$MINOR.$PATCH"
 
 echo "Version: $CURRENT_VERSION → $NEW_VERSION"

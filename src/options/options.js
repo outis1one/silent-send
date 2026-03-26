@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Apply settings to UI
   $('#showHighlights').checked = settings.showHighlights || false;
+  $('#secretScanning').checked = settings.secretScanning !== false;
   $('#maxLogEntries').value = settings.maxLogEntries || 200;
 
   renderMappings();
@@ -26,6 +27,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Settings listeners
   $('#showHighlights').addEventListener('change', async (e) => {
     await Storage.saveSettings({ showHighlights: e.target.checked });
+  });
+
+  $('#secretScanning').addEventListener('change', async (e) => {
+    await Storage.saveSettings({ secretScanning: e.target.checked });
   });
 
   $('#maxLogEntries').addEventListener('change', async (e) => {

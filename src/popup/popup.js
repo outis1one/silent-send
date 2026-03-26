@@ -1,5 +1,6 @@
 import SubstitutionEngine from '../lib/substitution-engine.js';
 import SmartPatterns from '../lib/smart-patterns.js';
+import SecretScanner from '../lib/secret-scanner.js';
 import Storage from '../lib/storage.js';
 import api from '../lib/browser-polyfill.js';
 
@@ -331,31 +332,50 @@ function renderTestDiff() {
 
   const smartResult = SmartPatterns.substitute(input, identity);
   const explicitResult = SubstitutionEngine.substitute(smartResult.text, mappings);
+  const secretResult = SecretScanner.redact(explicitResult.text);
 
-  const allReplacements = [...smartResult.replacements, ...explicitResult.replacements];
-  const finalText = explicitResult.text;
+  const allReplacements = [
+    ...smartResult.replacements,
+    ...explicitResult.replacements,
+    ...secretResult.redactions,
+  ];
+  const finalText = secretResult.text;
 
-  if (finalText === input) {
+  if (finalText === input && secretResult.warnings.length === 0) {
     output.textContent = input;
     stats.textContent = 'No substitutions detected';
     return;
   }
 
   let html = escapeHtml(finalText);
-  for (const r of allReplacements) {
+
+  // Highlight identity + explicit substitutions in green
+  for (const r of [...smartResult.replacements, ...explicitResult.replacements]) {
     const escapedReplaced = escapeHtml(r.replaced);
     html = html.replace(
       escapedReplaced,
       `<span class="sub-highlight" title="Was: ${escapeHtml(r.original)} [${r.pattern || r.category}]">${escapedReplaced}</span>`
     );
   }
+  // Highlight secret redactions in red
+  for (const r of secretResult.redactions) {
+    const escapedReplaced = escapeHtml(r.replaced);
+    html = html.replace(
+      escapedReplaced,
+      `<span class="sub-highlight" style="background:#fee2e2;color:#dc2626" title="${escapeHtml(r.pattern)}">${escapedReplaced}</span>`
+    );
+  }
   output.innerHTML = html;
 
   const smartCount = smartResult.replacements.length;
   const explicitCount = explicitResult.replacements.length;
+  const secretCount = secretResult.redactions.length;
+  const warnCount = secretResult.warnings.length;
   const parts = [];
   if (smartCount > 0) parts.push(`${smartCount} smart`);
   if (explicitCount > 0) parts.push(`${explicitCount} explicit`);
+  if (secretCount > 0) parts.push(`${secretCount} secrets redacted`);
+  if (warnCount > 0) parts.push(`${warnCount} warnings`);
   stats.textContent = `${allReplacements.length} substitution${allReplacements.length !== 1 ? 's' : ''} (${parts.join(', ')})`;
 }
 

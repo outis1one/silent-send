@@ -253,24 +253,113 @@
   }
 
   // ============================================================
-  // Combined substitution: smart patterns first, then explicit
+  // Combined substitution: smart patterns + explicit + secret scan
   // ============================================================
   function substituteAll(text) {
     const allReplacements = [];
 
-    // Smart patterns (broad catches)
+    // 1. Smart patterns (broad catches)
     const smart = smartSubstitute(text, identity);
     allReplacements.push(...smart.replacements);
 
-    // Explicit mappings (specific overrides)
+    // 2. Explicit mappings (specific overrides)
     const explicit = substitute(smart.text, mappings);
     allReplacements.push(...explicit.replacements);
+
+    // 3. Secret scanner (API keys, tokens, SSNs, credit cards, etc.)
+    if (settings.secretScanning !== false) {
+      const secrets = scanAndRedactSecrets(explicit.text);
+      allReplacements.push(...secrets.redactions);
+      return {
+        text: secrets.text,
+        replacements: allReplacements,
+        modified: allReplacements.length > 0,
+      };
+    }
 
     return {
       text: explicit.text,
       replacements: allReplacements,
       modified: allReplacements.length > 0,
     };
+  }
+
+  // ============================================================
+  // Secret Scanner (inline for page world)
+  // Detects API keys, tokens, passwords, SSNs, credit cards, etc.
+  // ============================================================
+  const SECRET_PATTERNS = [
+    // OpenAI
+    { name: 'OpenAI Key', re: /\bsk-[A-Za-z0-9]{20,}\b/g, to: '[REDACTED-OPENAI-KEY]' },
+    { name: 'OpenAI Project Key', re: /\bsk-proj-[A-Za-z0-9_-]{20,}\b/g, to: '[REDACTED-OPENAI-KEY]' },
+    // Anthropic
+    { name: 'Anthropic Key', re: /\bsk-ant-[A-Za-z0-9_-]{20,}\b/g, to: '[REDACTED-ANTHROPIC-KEY]' },
+    // Google
+    { name: 'Google API Key', re: /\bAIza[A-Za-z0-9_-]{35}\b/g, to: '[REDACTED-GOOGLE-KEY]' },
+    // AWS
+    { name: 'AWS Access Key', re: /\bAKIA[A-Z0-9]{16}\b/g, to: '[REDACTED-AWS-KEY]' },
+    // GitHub
+    { name: 'GitHub Token', re: /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}\b/g, to: '[REDACTED-GITHUB-TOKEN]' },
+    // GitLab
+    { name: 'GitLab Token', re: /\bglpat-[A-Za-z0-9_-]{20,}\b/g, to: '[REDACTED-GITLAB-TOKEN]' },
+    // Slack
+    { name: 'Slack Token', re: /\bxox[bpras]-[A-Za-z0-9-]{10,}\b/g, to: '[REDACTED-SLACK-TOKEN]' },
+    // Stripe
+    { name: 'Stripe Key', re: /\b[sr]k_(?:test|live)_[A-Za-z0-9]{20,}\b/g, to: '[REDACTED-STRIPE-KEY]' },
+    // SendGrid
+    { name: 'SendGrid Key', re: /\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}\b/g, to: '[REDACTED-SENDGRID-KEY]' },
+    // Bearer tokens
+    { name: 'Bearer Token', re: /\bBearer\s+[A-Za-z0-9_\-./+=]{20,}\b/g, to: 'Bearer [REDACTED]' },
+    // Private keys
+    { name: 'Private Key', re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/g, to: '[REDACTED-PRIVATE-KEY]' },
+    // Generic key=value assignments
+    { name: 'API Key Assignment', re: /\b(?:api[_-]?key|apikey|api[_-]?secret|api[_-]?token)\s*[:=]\s*['"]?([A-Za-z0-9_\-./+=]{16,})['"]?/gi,
+      fn: (m) => m.replace(/[:=]\s*['"]?[A-Za-z0-9_\-./+=]{16,}['"]?/, '=[REDACTED]') },
+    { name: 'Password/Secret Assignment', re: /\b(?:password|passwd|pwd|secret|token|auth[_-]?token|access[_-]?token)\s*[:=]\s*['"]?([^\s'"]{8,})['"]?/gi,
+      fn: (m) => m.replace(/[:=]\s*['"]?[^\s'"]{8,}['"]?/, '=[REDACTED]') },
+    // Connection strings with credentials
+    { name: 'Connection String', re: /\b(?:mongodb|postgres|mysql|redis|amqp):\/\/[^\s"']+/gi,
+      fn: (m) => m.replace(/:\/\/([^:]+):([^@]+)@/, '://REDACTED:REDACTED@') },
+    // SSN
+    { name: 'SSN', re: /\b\d{3}-\d{2}-\d{4}\b/g, to: '[REDACTED-SSN]' },
+    // Credit cards (Visa, MC, Amex, Discover)
+    { name: 'Credit Card', re: /\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b/g, to: '[REDACTED-CARD]' },
+  ];
+
+  function scanAndRedactSecrets(text) {
+    const redactions = [];
+    let result = text;
+
+    for (const pat of SECRET_PATTERNS) {
+      pat.re.lastIndex = 0;
+      const matches = [];
+      let m;
+
+      while ((m = pat.re.exec(result)) !== null) {
+        matches.push({ index: m.index, value: m[0] });
+      }
+
+      if (matches.length === 0) continue;
+
+      // Replace from end to preserve indices
+      for (let i = matches.length - 1; i >= 0; i--) {
+        const match = matches[i];
+        const replacement = pat.fn ? pat.fn(match.value) : pat.to;
+        redactions.push({
+          original: match.value.slice(0, 8) + '...',  // Don't log the full secret
+          replaced: replacement,
+          category: 'secret',
+          pattern: pat.name,
+        });
+        result =
+          result.slice(0, match.index) +
+          replacement +
+          result.slice(match.index + match.value.length);
+      }
+    }
+
+    redactions.reverse();
+    return { text: result, redactions };
   }
 
   // ============================================================

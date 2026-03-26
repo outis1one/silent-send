@@ -20,6 +20,7 @@ const DEFAULT_SETTINGS = {
   revealMode: false,
   secretScanning: true,
   autoDetect: true,
+  autoAddDetected: true,
   maxLogEntries: 200,
   customDomains: [],
   categories: ['name', 'email', 'phone', 'address', 'ssn', 'dob', 'domain', 'general'],

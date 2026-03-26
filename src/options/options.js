@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('#showHighlights').checked = settings.showHighlights || false;
   $('#secretScanning').checked = settings.secretScanning !== false;
   $('#autoDetect').checked = settings.autoDetect !== false;
+  $('#autoAddDetected').checked = settings.autoAddDetected !== false;
   $('#maxLogEntries').value = settings.maxLogEntries || 200;
 
   renderMappings();
@@ -44,6 +45,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   $('#autoDetect').addEventListener('change', async (e) => {
     await Storage.saveSettings({ autoDetect: e.target.checked });
+  });
+
+  $('#autoAddDetected').addEventListener('change', async (e) => {
+    await Storage.saveSettings({ autoAddDetected: e.target.checked });
   });
 
   $('#maxLogEntries').addEventListener('change', async (e) => {

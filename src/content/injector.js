@@ -126,6 +126,24 @@
         }, '*');
       }
     });
+
+    // Storage bridge — lets page world script read/write storage
+    window.addEventListener('message', async (event) => {
+      if (event.source !== window) return;
+
+      if (event.data?.type === 'ss:storage-get') {
+        const result = await api.storage.local.get(event.data.key);
+        window.postMessage({
+          type: 'ss:storage-result',
+          id: event.data.id,
+          value: result[event.data.key] || null,
+        }, '*');
+      }
+
+      if (event.data?.type === 'ss:storage-set') {
+        await api.storage.local.set({ [event.data.key]: event.data.value });
+      }
+    });
   }
 
   init();

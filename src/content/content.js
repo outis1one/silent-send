@@ -1006,15 +1006,181 @@
   }
 
   // ============================================================
-  // Input Highlighting
+  // Pre-Send PPI Detection — scans as you type/paste (spellcheck style)
   // ============================================================
+
+  // Generate plausible fake values for detected PPI
+  function generateFake(type, value) {
+    switch (type) {
+      case 'Private IP':
+      case 'Public IP':
+        return '10.' + rnd(1,254) + '.' + rnd(1,254) + '.' + rnd(1,254);
+      case 'MAC Address':
+        return Array.from({length:6}, () => rnd(0,255).toString(16).padStart(2,'0')).join(':');
+      case 'Street Address':
+        const streets = ['Oak', 'Maple', 'Pine', 'Cedar', 'Elm', 'Main', 'Park', 'Lake'];
+        const types = ['St', 'Ave', 'Dr', 'Ln', 'Rd'];
+        return rnd(100,9999) + ' ' + streets[rnd(0,7)] + ' ' + types[rnd(0,4)];
+      case 'GPS Coordinates':
+        return (rnd(-90,90) + Math.random()).toFixed(6) + ',' + (rnd(-180,180) + Math.random()).toFixed(6);
+      case 'Date (possible DOB)':
+        return (rnd(1,12) + '').padStart(2,'0') + '/' + (rnd(1,28) + '').padStart(2,'0') + '/' + rnd(1950,2005);
+      case 'EIN / Tax ID':
+        return rnd(10,99) + '-' + (rnd(1000000,9999999) + '');
+      case 'Home Path': {
+        const fakeUser = 'user' + rnd(100,999);
+        if (value.startsWith('C:\\')) return 'C:\\Users\\' + fakeUser;
+        if (value.startsWith('/Users/')) return '/Users/' + fakeUser;
+        return '/home/' + fakeUser;
+      }
+      case 'Shell Prompt':
+        return 'user@computer:$ ';
+      case 'Git Remote':
+        return value.replace(/[:/][^/\s]+\//, ':/anonymous/');
+      case 'Env Variable':
+        return value.split('=')[0] + '=REDACTED';
+      default:
+        return '[REDACTED]';
+    }
+  }
+
+  function rnd(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+  }
+
+  // Pre-send warning UI
+  let preSendWarningEl = null;
+  let preSendTimer = null;
+
+  function showPreSendWarning(warnings, inputEl) {
+    if (!preSendWarningEl) {
+      preSendWarningEl = document.createElement('div');
+      preSendWarningEl.className = 'ss-presend-warning';
+      document.body.appendChild(preSendWarningEl);
+    }
+
+    const items = warnings.slice(0, 8).map((w, i) => {
+      const fake = generateFake(w.name, w.value);
+      const displayVal = w.value.length > 25 ? w.value.slice(0, 22) + '...' : w.value;
+      return `<div class="ss-ps-item">
+        <span class="ss-ps-type">${w.name}</span>
+        <code class="ss-ps-value">${displayVal}</code>
+        <span class="ss-ps-hint">${w.hint}</span>
+        ${settings.autoAddDetected !== false
+          ? `<button class="ss-ps-add" data-real="${encodeURIComponent(w.value)}" data-fake="${encodeURIComponent(fake)}" data-cat="${w.category}" title="Add mapping: ${displayVal} → ${fake}">+</button>`
+          : ''}
+      </div>`;
+    }).join('');
+
+    const more = warnings.length > 8 ? `<div class="ss-ad-more">+${warnings.length - 8} more</div>` : '';
+
+    preSendWarningEl.innerHTML = `
+      <div class="ss-ad-header">
+        <strong>Potential PPI detected — not yet configured:</strong>
+        <button class="ss-ad-close">&times;</button>
+      </div>
+      ${items}
+      ${more}
+      <div class="ss-ad-footer">
+        ${settings.autoAddDetected !== false ? 'Click + to auto-add a mapping.' : ''}
+        Add to Identity or Mappings to protect this data.
+      </div>
+    `;
+
+    preSendWarningEl.classList.add('visible');
+
+    // Close button
+    preSendWarningEl.querySelector('.ss-ad-close').addEventListener('click', () => {
+      preSendWarningEl.classList.remove('visible');
+    });
+
+    // Auto-add buttons
+    preSendWarningEl.querySelectorAll('.ss-ps-add').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const real = decodeURIComponent(btn.dataset.real);
+        const fake = decodeURIComponent(btn.dataset.fake);
+        const cat = btn.dataset.cat || 'general';
+
+        // Add to mappings via storage
+        const result = await getStorageData('ss_mappings');
+        const currentMappings = result || [];
+        currentMappings.push({
+          id: crypto.randomUUID(),
+          real, substitute: fake,
+          category: cat,
+          caseSensitive: false,
+          enabled: true,
+          createdAt: Date.now(),
+        });
+        await setStorageData('ss_mappings', currentMappings);
+
+        // Update local mappings
+        mappings = currentMappings;
+
+        // Visual feedback
+        btn.textContent = '\u2714';
+        btn.style.color = '#4ade80';
+        btn.disabled = true;
+      });
+    });
+  }
+
+  // Storage helpers for page world (uses postMessage to injector)
+  function getStorageData(key) {
+    return new Promise(resolve => {
+      const id = 'ss-get-' + Math.random();
+      const handler = (event) => {
+        if (event.data?.type === 'ss:storage-result' && event.data.id === id) {
+          window.removeEventListener('message', handler);
+          resolve(event.data.value);
+        }
+      };
+      window.addEventListener('message', handler);
+      window.postMessage({ type: 'ss:storage-get', key, id }, '*');
+      // Timeout fallback
+      setTimeout(() => { window.removeEventListener('message', handler); resolve(null); }, 2000);
+    });
+  }
+
+  function setStorageData(key, value) {
+    window.postMessage({ type: 'ss:storage-set', key, value }, '*');
+  }
+
+  // Scan input on type and paste
+  let inputScanTimer = null;
+
+  function scanInputForPPI(target) {
+    const text = target.textContent || target.value || '';
+    if (!text || text.length < 5) {
+      if (preSendWarningEl) preSendWarningEl.classList.remove('visible');
+      return;
+    }
+
+    const warnings = autoDetectPPI(text, identity);
+    if (warnings.length > 0) {
+      showPreSendWarning(warnings, target);
+    } else if (preSendWarningEl) {
+      preSendWarningEl.classList.remove('visible');
+    }
+  }
+
   document.addEventListener('input', (e) => {
-    if (!settings.showHighlights || !hasSubstitutions()) return;
+    if (settings.autoDetect === false) return;
     const target = e.target;
     if (target.matches?.('[contenteditable], textarea, input[type="text"]')) {
-      const text = target.textContent || target.value || '';
-      const r = substituteAll(text);
-      target.classList.toggle('ss-has-sensitive', r.modified);
+      // Debounce — don't scan on every keystroke
+      if (inputScanTimer) clearTimeout(inputScanTimer);
+      inputScanTimer = setTimeout(() => scanInputForPPI(target), 800);
+    }
+  }, true);
+
+  document.addEventListener('paste', (e) => {
+    if (settings.autoDetect === false) return;
+    const target = e.target;
+    if (target.matches?.('[contenteditable], textarea, input[type="text"]') ||
+        target.closest?.('[contenteditable]')) {
+      // Scan shortly after paste completes
+      setTimeout(() => scanInputForPPI(target.closest?.('[contenteditable]') || target), 200);
     }
   }, true);
 

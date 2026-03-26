@@ -285,8 +285,21 @@
   }
 
   // ============================================================
-  // Process a JSON body — handles all known AI service API shapes
+  // Deep JSON scanner — finds and substitutes ALL strings in
+  // any JSON structure. Service-agnostic. Survives API changes.
   // ============================================================
+  const SKIP_KEYS = new Set([
+    // Keys that should never be modified (auth, metadata, IDs)
+    'model', 'id', 'parent_message_id', 'conversation_id',
+    'organization_id', 'uuid', 'token', 'api_key', 'key',
+    'authorization', 'cookie', 'csrf', 'nonce', 'hash',
+    'Content-Type', 'content-type', 'Accept', 'accept',
+    'User-Agent', 'user-agent', 'x-request-id',
+  ]);
+
+  // Min length for a string to be worth scanning
+  const MIN_STRING_LENGTH = 2;
+
   function processBody(body) {
     let modified = false;
     const allReplacements = [];
@@ -300,94 +313,44 @@
       return r;
     }
 
-    // Walk any string values that look like user content
-    function walkAndSubstitute(obj, key) {
-      if (typeof obj[key] === 'string' && obj[key].length > 0) {
-        const r = processText(obj[key]);
-        if (r.modified) obj[key] = r.text;
-      }
-    }
-
-    // --- Claude: { prompt: "..." } ---
-    if (typeof body.prompt === 'string') {
-      walkAndSubstitute(body, 'prompt');
-    }
-
-    // --- Claude / OpenAI / OpenWebUI: { messages: [{ role, content }] } ---
-    if (Array.isArray(body.messages)) {
-      for (const msg of body.messages) {
-        if (msg.role !== 'user' && msg.role !== 'human') continue;
-
-        if (typeof msg.content === 'string') {
-          walkAndSubstitute(msg, 'content');
+    // Recursively walk any JSON structure and substitute all strings
+    function deepWalk(obj, parentKey) {
+      if (typeof obj === 'string') {
+        if (obj.length >= MIN_STRING_LENGTH) {
+          return processText(obj);
         }
+        return { text: obj, modified: false };
+      }
 
-        if (Array.isArray(msg.content)) {
-          for (let j = 0; j < msg.content.length; j++) {
-            const part = msg.content[j];
-            if (typeof part === 'string') {
-              const r = processText(part);
-              if (r.modified) msg.content[j] = r.text;
-            } else if (part?.type === 'text' && typeof part.text === 'string') {
-              walkAndSubstitute(part, 'text');
-            }
+      if (Array.isArray(obj)) {
+        for (let i = 0; i < obj.length; i++) {
+          if (typeof obj[i] === 'string' && obj[i].length >= MIN_STRING_LENGTH) {
+            const r = processText(obj[i]);
+            if (r.modified) obj[i] = r.text;
+          } else if (typeof obj[i] === 'object' && obj[i] !== null) {
+            deepWalk(obj[i], null);
+          }
+        }
+        return;
+      }
+
+      if (typeof obj === 'object' && obj !== null) {
+        for (const key of Object.keys(obj)) {
+          // Skip metadata/auth keys
+          if (SKIP_KEYS.has(key)) continue;
+
+          const val = obj[key];
+          if (typeof val === 'string' && val.length >= MIN_STRING_LENGTH) {
+            const r = processText(val);
+            if (r.modified) obj[key] = r.text;
+          } else if (typeof val === 'object' && val !== null) {
+            deepWalk(val, key);
           }
         }
       }
     }
 
-    // --- Claude: { content: [{ type: "text", text }] } ---
-    if (Array.isArray(body.content) && !Array.isArray(body.messages)) {
-      for (let i = 0; i < body.content.length; i++) {
-        const item = body.content[i];
-        if (item.type === 'text' && typeof item.text === 'string') {
-          walkAndSubstitute(item, 'text');
-        }
-      }
-    }
-
-    // --- ChatGPT: { action: "next", messages: [{ content: { parts: ["..."] } }] } ---
-    if (Array.isArray(body.messages)) {
-      for (const msg of body.messages) {
-        if (msg.content?.parts && Array.isArray(msg.content.parts)) {
-          for (let i = 0; i < msg.content.parts.length; i++) {
-            if (typeof msg.content.parts[i] === 'string') {
-              const r = processText(msg.content.parts[i]);
-              if (r.modified) msg.content.parts[i] = r.text;
-            }
-          }
-        }
-      }
-    }
-
-    // --- Gemini: nested prompts in f.req batch RPC (text strings in arrays) ---
-    // Gemini uses a complex nested array format. We recursively find strings.
-    if (Array.isArray(body) || body?.fReq) {
-      function walkArray(arr) {
-        for (let i = 0; i < arr.length; i++) {
-          if (typeof arr[i] === 'string' && arr[i].length > 2) {
-            const r = processText(arr[i]);
-            if (r.modified) arr[i] = r.text;
-          } else if (Array.isArray(arr[i])) {
-            walkArray(arr[i]);
-          }
-        }
-      }
-      if (Array.isArray(body)) walkArray(body);
-    }
-
-    // --- Grok: { message: "...", messages: [...] } ---
-    if (typeof body.message === 'string') {
-      walkAndSubstitute(body, 'message');
-    }
-
-    // --- OpenWebUI: { prompt: "...", messages: [...], model: "..." } ---
-    // Already handled by 'prompt' and 'messages' above
-
-    // --- Generic: { query: "..." } or { input: "..." } ---
-    if (typeof body.query === 'string') walkAndSubstitute(body, 'query');
-    if (typeof body.input === 'string') walkAndSubstitute(body, 'input');
-
+    deepWalk(body, null);
     return { modified, replacements: allReplacements };
   }
 
@@ -403,37 +366,24 @@
   }
 
   // ============================================================
-  // API URL Detection — matches known AI service endpoints
-  // ============================================================
-  const API_PATTERNS = [
-    // Claude
-    /\/api\/organizations\/.*\/(chat_conversations|completion|messages)/,
-    // ChatGPT / OpenAI
-    /\/backend-api\/conversation/,
-    /\/api\/conversation/,
-    /\/v1\/chat\/completions/,
-    // Grok
-    /\/i\/api\/graphql.*grok/i,
-    /grok.*\/api\//,
-    /\/2\/grok\/add_response/,
-    // Gemini
-    /\/_\/BardChatUi\/data\//,
-    /\/google\.internal\.gemini/,
-    /generativelanguage.*generateContent/,
-    // OpenWebUI (self-hosted, various paths)
-    /\/api\/chat\/?/,
-    /\/ollama\/api\/chat/,
-    /\/api\/v1\/chat\/completions/,
-  ];
-
-  function isTargetApiUrl(url) {
-    return API_PATTERNS.some(pattern => pattern.test(url));
-  }
-
-  // ============================================================
-  // Fetch Interception
+  // Fetch Interception — scans ALL POST requests with a body.
+  // Service-agnostic: doesn't depend on URL patterns.
   // ============================================================
   const originalFetch = window.fetch;
+
+  // URLs to never touch (static assets, analytics, etc.)
+  const SKIP_URL_PATTERNS = [
+    /\.(js|css|png|jpg|jpeg|gif|svg|woff2?|ttf|ico)(\?|$)/i,
+    /\/analytics\//i,
+    /\/telemetry\//i,
+    /\/log\//i,
+    /google-analytics/i,
+    /sentry/i,
+  ];
+
+  function shouldSkipUrl(url) {
+    return SKIP_URL_PATTERNS.some(p => p.test(url));
+  }
 
   window.fetch = async function (url, options) {
     if (!settings.enabled || !hasSubstitutions()) {
@@ -441,10 +391,16 @@
     }
 
     const urlStr = typeof url === 'string' ? url : url?.url || '';
+    const method = (options?.method || 'GET').toUpperCase();
 
-    if (isTargetApiUrl(urlStr) && options?.body && typeof options.body === 'string') {
+    // Only intercept POST/PUT/PATCH with a string body
+    if (
+      (method === 'POST' || method === 'PUT' || method === 'PATCH') &&
+      options?.body && typeof options.body === 'string' &&
+      !shouldSkipUrl(urlStr)
+    ) {
       try {
-        // Try JSON first (most services)
+        // Try JSON
         const body = JSON.parse(options.body);
         const { modified, replacements } = processBody(body);
 
@@ -452,23 +408,21 @@
           options = { ...options, body: JSON.stringify(body) };
           notifySubstitutions(replacements);
           console.log(
-            `[Silent Send] Substituted ${replacements.length} value(s) in fetch request`
+            `[Silent Send] Substituted ${replacements.length} value(s) in ${urlStr}`
           );
         }
       } catch (e) {
-        // Not JSON — try form-encoded (Gemini uses f.req param)
-        try {
-          if (options.body.includes('f.req=') || options.body.includes('at=')) {
-            const result = substituteAll(options.body);
-            if (result.modified) {
-              options = { ...options, body: result.text };
-              notifySubstitutions(result.replacements);
-              console.log(
-                `[Silent Send] Substituted ${result.replacements.length} value(s) in form request`
-              );
-            }
+        // Not JSON — try raw string substitution (form data, etc.)
+        if (options.body.length > MIN_STRING_LENGTH) {
+          const result = substituteAll(options.body);
+          if (result.modified) {
+            options = { ...options, body: result.text };
+            notifySubstitutions(result.replacements);
+            console.log(
+              `[Silent Send] Substituted ${result.replacements.length} value(s) in form body`
+            );
           }
-        } catch (e2) { /* pass through */ }
+        }
       }
     }
 
@@ -476,21 +430,24 @@
   };
 
   // ============================================================
-  // XMLHttpRequest Interception (fallback)
+  // XMLHttpRequest Interception — same aggressive approach
   // ============================================================
   const origOpen = XMLHttpRequest.prototype.open;
   const origSend = XMLHttpRequest.prototype.send;
 
   XMLHttpRequest.prototype.open = function (method, url, ...rest) {
     this._ssUrl = url;
+    this._ssMethod = method;
     return origOpen.call(this, method, url, ...rest);
   };
 
   XMLHttpRequest.prototype.send = function (body) {
+    const method = (this._ssMethod || 'GET').toUpperCase();
     if (
       settings.enabled && hasSubstitutions() &&
-      typeof body === 'string' && this._ssUrl &&
-      isTargetApiUrl(this._ssUrl)
+      (method === 'POST' || method === 'PUT' || method === 'PATCH') &&
+      typeof body === 'string' && body.length > MIN_STRING_LENGTH &&
+      !shouldSkipUrl(this._ssUrl || '')
     ) {
       try {
         const parsed = JSON.parse(body);
@@ -499,7 +456,14 @@
           body = JSON.stringify(parsed);
           notifySubstitutions(replacements);
         }
-      } catch (e) { /* pass through */ }
+      } catch (e) {
+        // Not JSON — raw string
+        const result = substituteAll(body);
+        if (result.modified) {
+          body = result.text;
+          notifySubstitutions(result.replacements);
+        }
+      }
     }
     return origSend.call(this, body);
   };
@@ -507,24 +471,6 @@
   // ============================================================
   // Response Reveal — swaps fake data back to real in the page
   // ============================================================
-
-  // All response/output selectors across supported services
-  const RESPONSE_SELECTORS = [
-    // Claude
-    '[data-is-streaming]', '.font-claude-message',
-    // Claude artifacts / code
-    '.code-block__code', '.artifact-content', 'pre code', 'pre',
-    // ChatGPT
-    '[data-message-author-role="assistant"]', '.markdown',
-    // Grok
-    '[class*="message-bubble"]', '[class*="response"]',
-    // Gemini
-    '.model-response-text', '.response-content', 'message-content',
-    // Generic / OpenWebUI
-    '.prose', '[class*="Message"]', '[class*="assistant"]',
-    // Code and artifacts everywhere
-    'code', '.hljs', '.highlight',
-  ].join(', ');
 
   // Build reverse mapping pairs from identity + explicit mappings
   function buildRevealPairs() {
@@ -564,8 +510,15 @@
     return pairs;
   }
 
+  // Cache reveal pairs — rebuild when config changes
+  let _revealPairsCache = null;
+  window.addEventListener('message', (event) => {
+    if (event.data?.type === 'ss:config-updated') _revealPairsCache = null;
+  });
+
   function revealText(text) {
-    const pairs = buildRevealPairs();
+    if (!_revealPairsCache) _revealPairsCache = buildRevealPairs();
+    const pairs = _revealPairsCache;
     let result = text;
     for (const p of pairs) {
       const escaped = esc(p.from);
@@ -579,13 +532,24 @@
   const originalTexts = new WeakMap();
 
   function revealInElement(el) {
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    if (SKIP_REVEAL_TAGS.has(el.tagName)) return;
+    // Skip our own badge
+    if (el.classList?.contains('ss-reveal-badge')) return;
+
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const parent = node.parentElement;
+        if (parent && SKIP_REVEAL_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
+        if (parent?.classList?.contains('ss-reveal-badge')) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+
     let textNode;
     while ((textNode = walker.nextNode())) {
       const text = textNode.textContent;
-      if (!text || text.trim().length === 0) continue;
+      if (!text || text.length < MIN_STRING_LENGTH) continue;
 
-      // Save original if not already saved
       if (!originalTexts.has(textNode)) {
         originalTexts.set(textNode, text);
       }
@@ -598,6 +562,8 @@
   }
 
   function unrevealInElement(el) {
+    if (SKIP_REVEAL_TAGS.has(el.tagName)) return;
+
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     let textNode;
     while ((textNode = walker.nextNode())) {
@@ -608,54 +574,60 @@
     }
   }
 
-  // Reveal ALL existing responses on the page
+  // Elements to skip when revealing (inputs, scripts, styles, extension UI)
+  const SKIP_REVEAL_TAGS = new Set([
+    'SCRIPT', 'STYLE', 'NOSCRIPT', 'IFRAME', 'INPUT', 'TEXTAREA', 'SELECT',
+  ]);
+
+  // Reveal ALL text on the page (not just specific selectors)
   function revealAllResponses() {
-    const elements = document.querySelectorAll(RESPONSE_SELECTORS);
-    for (const el of elements) {
-      revealInElement(el);
-    }
+    revealInElement(document.body);
   }
 
-  // Un-reveal ALL responses (restore originals)
+  // Un-reveal ALL text on the page
   function unrevealAllResponses() {
-    const elements = document.querySelectorAll(RESPONSE_SELECTORS);
-    for (const el of elements) {
-      unrevealInElement(el);
-    }
+    unrevealInElement(document.body);
   }
 
-  // Watch for new content (streaming responses, new messages)
+  // Watch for ANY new content on the page
   function observeResponses() {
     const observer = new MutationObserver((mutations) => {
       if (!settings.revealMode || !hasSubstitutions()) return;
 
       for (const mutation of mutations) {
-        // Handle new nodes
+        // Handle new nodes — reveal all text in them
         for (const node of mutation.addedNodes) {
-          if (node.nodeType !== Node.ELEMENT_NODE) continue;
-
-          const responseEls = node.querySelectorAll
-            ? node.querySelectorAll(RESPONSE_SELECTORS)
-            : [];
-          for (const el of responseEls) revealInElement(el);
-
-          if (node.matches?.(RESPONSE_SELECTORS)) {
-            revealInElement(node);
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            if (!SKIP_REVEAL_TAGS.has(node.tagName)) {
+              revealInElement(node);
+            }
+          } else if (node.nodeType === Node.TEXT_NODE) {
+            const text = node.textContent;
+            if (text && text.length >= MIN_STRING_LENGTH) {
+              if (!originalTexts.has(node)) {
+                originalTexts.set(node, text);
+              }
+              const revealed = revealText(text);
+              if (revealed !== text) {
+                node.textContent = revealed;
+              }
+            }
           }
         }
 
-        // Handle text changes in existing nodes (streaming)
+        // Handle text changes in existing nodes (streaming responses)
         if (mutation.type === 'characterData' && settings.revealMode) {
-          const parentEl = mutation.target.parentElement;
-          if (parentEl?.closest?.(RESPONSE_SELECTORS)) {
-            const text = mutation.target.textContent;
-            const revealed = revealText(text);
-            if (revealed !== text) {
-              // Save original before overwriting
+          const text = mutation.target.textContent;
+          if (text && text.length >= MIN_STRING_LENGTH) {
+            const parent = mutation.target.parentElement;
+            if (parent && !SKIP_REVEAL_TAGS.has(parent.tagName)) {
               if (!originalTexts.has(mutation.target)) {
                 originalTexts.set(mutation.target, text);
               }
-              mutation.target.textContent = revealed;
+              const revealed = revealText(text);
+              if (revealed !== text) {
+                mutation.target.textContent = revealed;
+              }
             }
           }
         }

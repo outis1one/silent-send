@@ -139,8 +139,8 @@ const SilentSendSync = {
   /**
    * Authenticate with password (+ optional TOTP) and cache the key.
    * Called from the UI — typically only needed ONCE per device.
-   * After this, the key persists in IndexedDB and WebAuthn handles
-   * any re-verification.
+   * After this, the key persists in IndexedDB and re-verification
+   * can use WebAuthn or TOTP alone.
    *
    * @param {string} password
    * @param {string} [totpCode] — required if TOTP is configured
@@ -187,6 +187,77 @@ const SilentSendSync = {
     }
 
     return { success: true };
+  },
+
+  /**
+   * Re-verify identity using TOTP code alone (no password needed).
+   * Only works when the key is already cached (not first-device setup).
+   * Resets the TTL timer on success.
+   *
+   * @param {string} totpCode — 6-digit TOTP code
+   * @returns {{ success: boolean, reason?: string }}
+   */
+  async reverifyWithTOTP(totpCode) {
+    const config = await this._getSyncEncryption();
+    if (!config?.enabled) return { success: false, reason: 'Encryption not enabled.' };
+    if (!config.totpSecret) return { success: false, reason: 'TOTP not configured.' };
+
+    // Must have a cached key — TOTP can't derive one
+    const cached = await SilentSendCrypto.getCachedKey();
+    if (!cached) return { success: false, reason: 'No cached key. Password required for first setup.' };
+
+    // Validate the TOTP code
+    const valid = await SilentSendCrypto.validateTOTP(config.totpSecret, totpCode);
+    if (!valid) return { success: false, reason: 'Invalid TOTP code.' };
+
+    // Reset the TTL timer
+    await SilentSendCrypto.markVerified(config.ttlDays ?? 90);
+    return { success: true };
+  },
+
+  /**
+   * Re-verify identity using password alone (no TOTP needed).
+   * Only works when the key is already cached (not first-device setup).
+   * Resets the TTL timer on success.
+   *
+   * @param {string} password
+   * @returns {{ success: boolean, reason?: string }}
+   */
+  async reverifyWithPassword(password) {
+    const config = await this._getSyncEncryption();
+    if (!config?.enabled) return { success: false, reason: 'Encryption not enabled.' };
+
+    // Must have a cached key
+    const cached = await SilentSendCrypto.getCachedKey();
+    if (!cached) return { success: false, reason: 'No cached key. Full authentication required.' };
+
+    // Verify password against the verification blob
+    const { key } = await SilentSendCrypto.deriveAndReturnKey(password, config.salt);
+    if (config.verificationBlob) {
+      try {
+        await SilentSendCrypto.decryptWithKey(config.verificationBlob, key);
+      } catch {
+        return { success: false, reason: 'Wrong password.' };
+      }
+    }
+
+    // Reset the TTL timer
+    await SilentSendCrypto.markVerified(config.ttlDays ?? 90);
+    return { success: true };
+  },
+
+  /**
+   * Check if re-verification is needed (TTL expired but key exists).
+   * Different from needsAuth() which checks if the key is missing entirely.
+   */
+  async needsReverification() {
+    const config = await this._getSyncEncryption();
+    if (!config?.enabled) return false;
+
+    const cached = await SilentSendCrypto.getCachedKey();
+    if (!cached) return false; // no key = needs full auth, not re-verify
+
+    return SilentSendCrypto.needsReverification();
   },
 
   /**

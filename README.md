@@ -18,10 +18,11 @@ A browser extension (Chrome + Firefox) that intercepts personal information and 
 
 1. **You fill in your Identity** — name, email, username, computer name, phone
 2. **Smart patterns auto-catch variations** — `jsmith@macbook-pro`, `John's`, `/home/jsmith`, `555.123.4567`
-3. **You type normally** — you see your real text while composing
-4. **On send, it swaps** — the extension intercepts the API request and replaces real values with substitutes
-5. **Badge shows count** — the extension icon shows how many substitutions were made
-6. **Reveal mode** — optionally translates Claude's responses back to your real data
+3. **Secret scanner auto-redacts credentials** — API keys, tokens, passwords, SSNs, credit cards (zero config)
+4. **You type normally** — you see your real text while composing
+5. **On send, it swaps** — the extension intercepts the API request and replaces real values with substitutes
+6. **Badge shows count** — the extension icon shows how many substitutions were made
+7. **Reveal mode** — translates AI responses back to your real data, right in the chat window
 
 ### Smart pattern examples
 
@@ -38,6 +39,26 @@ A browser extension (Chrome + Firefox) that intercepts personal information and 
 | `(555) 123-4567` | `(555) 000-0000` |
 | `555.123.4567` | `(555) 000-0000` |
 | `macbook-pro` | `mycomputer` |
+
+### Secret scanner (automatic, no configuration needed)
+
+| You type | What gets sent |
+|----------|---------------|
+| `sk-proj-abc123xyz789...` | `[REDACTED-OPENAI-KEY]` |
+| `sk-ant-api01-xyz...` | `[REDACTED-ANTHROPIC-KEY]` |
+| `ghp_xxxxxxxxxxxxxxxxxxxx` | `[REDACTED-GITHUB-TOKEN]` |
+| `AKIAIOSFODNN7EXAMPLE` | `[REDACTED-AWS-KEY]` |
+| `sk_live_abc123...` | `[REDACTED-STRIPE-KEY]` |
+| `AIzaSyxxxxxxxxxxxxxxxxx` | `[REDACTED-GOOGLE-KEY]` |
+| `glpat-xxxxxxxxxxxx` | `[REDACTED-GITLAB-TOKEN]` |
+| `xoxb-xxx-xxx-xxx` | `[REDACTED-SLACK-TOKEN]` |
+| `Bearer eyJhbGciOi...` | `Bearer [REDACTED]` |
+| `password=MyS3cret!` | `password=[REDACTED]` |
+| `api_key=abcdef123456...` | `api_key=[REDACTED]` |
+| `postgres://user:pass@host` | `postgres://REDACTED:REDACTED@host` |
+| `-----BEGIN RSA PRIVATE KEY-----` | `[REDACTED-PRIVATE-KEY]` |
+| `123-45-6789` | `[REDACTED-SSN]` |
+| `4111 1111 1111 1111` | `[REDACTED-CARD]` |
 
 ## How to verify it's working
 
@@ -189,6 +210,7 @@ src/
   lib/
     substitution-engine.js — Core explicit find/replace logic
     smart-patterns.js   — Auto-detection of emails, names, usernames, hostnames, phones, paths
+    secret-scanner.js   — Auto-detection of API keys, tokens, passwords, SSNs, credit cards
     storage.js          — Browser storage wrapper
     browser-polyfill.js — Chrome/Firefox API compatibility
 ```

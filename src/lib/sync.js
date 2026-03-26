@@ -65,7 +65,7 @@ const SilentSendSync = {
         }
       }
 
-      await this._applyData(data);
+      await this._applyData(data, 'code');
       return { success: true, importTime: new Date(data.lastModified).toLocaleString() };
     } catch (e) {
       return { success: false, reason: e.message };
@@ -131,7 +131,7 @@ const SilentSendSync = {
       const json = chunkKeys.map(k => chunkResult[k] || '').join('');
       const data = JSON.parse(json);
 
-      await this._applyData(data);
+      await this._applyData(data, 'browser-sync');
       return { imported: true, time: new Date(data.lastModified).toLocaleString() };
     } catch (e) {
       console.warn('[Silent Send] pullFromSyncStorage failed:', e);
@@ -154,8 +154,12 @@ const SilentSendSync = {
     };
   },
 
-  async _applyData(data) {
-    const toSet = { ss_lastModified: data.lastModified };
+  async _applyData(data, source = 'unknown') {
+    const toSet = {
+      ss_lastModified: data.lastModified,
+      // Signal the service worker to show a badge/notification
+      ss_sync_notification: { source, time: Date.now() },
+    };
     if (data.identity !== undefined) toSet.ss_identity = data.identity;
     if (data.mappings !== undefined) toSet.ss_mappings = data.mappings;
     if (data.settings !== undefined) toSet.ss_settings = data.settings;

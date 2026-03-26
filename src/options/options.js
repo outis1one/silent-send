@@ -96,6 +96,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // --- File-based auto-sync ---
+  // Tell the service worker the user has seen any pending sync notification
+  api.runtime.sendMessage({ type: 'sync:notification-seen' }).catch(() => {});
+  await api.storage.local.remove('ss_sync_notification');
+
   await initFileSync();
 
   $('#btnPickSyncFolder').addEventListener('click', pickSyncFolder);
@@ -559,7 +563,7 @@ async function checkFileSyncUpdate() {
 
     const local = await SilentSendSync._getAllData();
     if (data.lastModified > (local.lastModified || 0)) {
-      await SilentSendSync._applyData(data);
+      await SilentSendSync._applyData(data, 'file');
       mappings = await Storage.getMappings();
       settings = await Storage.getSettings();
       $('#browserSync').checked = settings.browserSync === true;

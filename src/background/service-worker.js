@@ -146,6 +146,13 @@ const messageHandlers = {
     sendResponse({ count: tabCounts.get(tabId) || 0 });
   },
 
+  async 'sync:notification-seen'() {
+    // Options page opened — clear the sync badge and pending notification flag
+    await api.storage.local.remove('ss_sync_notification');
+    api.action.setBadgeText({ text: '' });
+    api.action.setBadgeBackgroundColor({ color: '#6b7280' });
+  },
+
   async 'update:settings'(message) {
     await Storage.saveSettings(message.settings);
 
@@ -309,12 +316,47 @@ api.storage.onChanged.addListener(async (changes, areaName) => {
     }
   }
 
+  // When a sync operation applied new data, show badge + notification
+  if (areaName === 'local' && changes.ss_sync_notification?.newValue) {
+    const notif = changes.ss_sync_notification.newValue;
+    const sourceLabel = {
+      'file': 'sync folder',
+      'browser-sync': 'browser account sync',
+      'code': 'sync code import',
+    }[notif.source] || 'sync';
+
+    // Purple badge — persists until Options is opened
+    api.action.setBadgeText({ text: 'SYN' });
+    api.action.setBadgeBackgroundColor({ color: '#7c3aed' });
+
+    // Desktop notification
+    try {
+      api.notifications.create('ss-sync-applied', {
+        type: 'basic',
+        iconUrl: 'icons/icon48.svg',
+        title: 'Silent Send — Settings Synced',
+        message: `Settings updated via ${sourceLabel}. Open Options to review.`,
+        priority: 1,
+      });
+    } catch (e) {
+      // Notifications permission not granted — badge is still visible
+    }
+  }
+
   // When sync storage changes (another device pushed new data), pull it into local
   if (areaName === 'sync' && (changes.ss_sync_meta || Object.keys(changes).some(k => k.startsWith('ss_sync_chunk_')))) {
     const settings = await Storage.getSettings();
     if (settings.browserSync) {
       await SilentSendSync.pullFromSyncStorage();
     }
+  }
+});
+
+// Clicking a sync notification opens the Options page
+api.notifications.onClicked.addListener((notificationId) => {
+  if (notificationId === 'ss-sync-applied') {
+    api.runtime.openOptionsPage();
+    api.notifications.clear(notificationId);
   }
 });
 
@@ -329,6 +371,14 @@ api.runtime.onInstalled.addListener(async () => {
 (async () => {
   const settings = await Storage.getSettings();
   await updateIcon(settings);
+
+  // Restore the SYN badge if the user hasn't opened Options since the last sync
+  const stored = await api.storage.local.get('ss_sync_notification');
+  if (stored.ss_sync_notification) {
+    api.action.setBadgeText({ text: 'SYN' });
+    api.action.setBadgeBackgroundColor({ color: '#7c3aed' });
+  }
+
   if (settings.browserSync) {
     await SilentSendSync.pullFromSyncStorage();
   }

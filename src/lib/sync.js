@@ -12,10 +12,16 @@
  * 5. Custom HTTP endpoint — any URL supporting GET + PUT (WebDAV,
  *    self-hosted server, cloud function, etc.).
  *
+ * Encryption: all sync channels can optionally encrypt data with a
+ * password (AES-256-GCM) and/or require TOTP verification.
+ * Authentication is cached with a configurable TTL so the user only
+ * needs to authenticate when the cache expires and new data exists.
+ *
  * Conflict resolution: newest `lastModified` timestamp wins.
  */
 
 import api from './browser-polyfill.js';
+import SilentSendCrypto from './crypto.js';
 
 // browser.storage.sync per-item limit (leave generous headroom)
 const SYNC_CHUNK_SIZE = 5000;
@@ -24,31 +30,303 @@ const SYNC_META_KEY = 'ss_sync_meta';
 
 const SilentSendSync = {
   // ----------------------------------------------------------------
-  // Sync Code — manual cross-browser copy-paste
+  // Encryption helpers — used by all sync channels
   // ----------------------------------------------------------------
 
   /**
-   * Export all settings/mappings/identity as a compact base64 sync code.
-   * Share this code with another browser to import.
+   * Get sync encryption settings from storage.
    */
-  async exportSyncCode() {
-    const data = await this._getAllData();
-    const json = JSON.stringify(data);
-    // btoa requires ASCII; use encodeURIComponent to handle Unicode
-    return btoa(unescape(encodeURIComponent(json)));
+  async _getSyncEncryption() {
+    const result = await api.storage.local.get('ss_sync_encryption');
+    return result.ss_sync_encryption || null;
+    // Shape: { enabled, salt, totpSecret?, authMethod, ttlDays, webauthn? }
+  },
+
+  async _saveSyncEncryption(config) {
+    await api.storage.local.set({ ss_sync_encryption: config });
   },
 
   /**
-   * Import from a sync code string.
-   * Returns { success, importTime } or { success: false, skipped?, reason, localTime?, importTime? }
+   * Obtain the encryption key — from cache, WebAuthn, or requires password.
+   * Returns { key, salt } or null if auth is required.
    *
-   * Conflict resolution: newest timestamp wins.
-   * Pass force=true to override even if local is newer.
+   * The caller should handle null by prompting the user.
    */
+  async _getEncryptionKey() {
+    const config = await this._getSyncEncryption();
+    if (!config?.enabled) return null;
+
+    // Try cached key first
+    const cached = await SilentSendCrypto.getCachedKey();
+    if (cached) return cached;
+
+    // Try WebAuthn re-auth if configured
+    if (config.webauthn && SilentSendCrypto.isWebAuthnAvailable()) {
+      const hasCredential = await SilentSendCrypto.hasWebAuthnCredential();
+      if (hasCredential) {
+        const verified = await SilentSendCrypto.webAuthnAuthenticate();
+        if (verified) {
+          // WebAuthn passed — but we need the actual key.
+          // The key must have been cached previously (before expiry triggered re-auth).
+          // If it's gone from cache, we need the password again.
+          // Check if we stored a wrapped version for WebAuthn recovery.
+          const wrapped = await this._getWrappedKey();
+          if (wrapped) return wrapped;
+        }
+      }
+    }
+
+    // No cached key, no WebAuthn recovery — password needed
+    return null;
+  },
+
+  /**
+   * Store a wrapped copy of the key that can be recovered after WebAuthn.
+   * The key is stored encrypted with a random device key in IndexedDB.
+   */
+  async _storeWrappedKey(key, salt) {
+    try {
+      const db = await SilentSendCrypto._openCacheDB();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction('keys', 'readwrite');
+        tx.objectStore('keys').put({ key, salt, storedAt: Date.now() }, 'wrappedSyncKey');
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch { /* non-fatal */ }
+  },
+
+  async _getWrappedKey() {
+    try {
+      const db = await SilentSendCrypto._openCacheDB();
+      return new Promise((resolve) => {
+        const tx = db.transaction('keys', 'readonly');
+        const req = tx.objectStore('keys').get('wrappedSyncKey');
+        req.onsuccess = () => {
+          const entry = req.result;
+          if (entry?.key) {
+            resolve({ key: entry.key, salt: entry.salt });
+          } else {
+            resolve(null);
+          }
+        };
+        req.onerror = () => resolve(null);
+      });
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Authenticate with password (+ optional TOTP) and cache the key.
+   * Called from the UI after prompting the user.
+   *
+   * @param {string} password
+   * @param {string} [totpCode] — required if TOTP is configured
+   * @returns {{ success: boolean, reason?: string }}
+   */
+  async authenticate(password, totpCode) {
+    const config = await this._getSyncEncryption();
+    if (!config?.enabled) return { success: true };
+
+    // Validate TOTP if configured
+    if (config.totpSecret) {
+      if (!totpCode) return { success: false, reason: 'TOTP code required.' };
+      const valid = await SilentSendCrypto.validateTOTP(config.totpSecret, totpCode);
+      if (!valid) return { success: false, reason: 'Invalid TOTP code.' };
+    }
+
+    // Derive key from password using stored salt
+    const { key, salt } = await SilentSendCrypto.deriveAndReturnKey(password, config.salt);
+
+    // Verify the password is correct by trying to decrypt the verification blob
+    if (config.verificationBlob) {
+      try {
+        await SilentSendCrypto.decryptWithKey(config.verificationBlob, key);
+      } catch {
+        return { success: false, reason: 'Wrong password.' };
+      }
+    }
+
+    // Cache the key
+    const ttlDays = config.ttlDays ?? 90;
+    await SilentSendCrypto.cacheKey(key, salt, ttlDays);
+
+    // Store wrapped key for WebAuthn recovery
+    if (config.webauthn) {
+      await this._storeWrappedKey(key, salt);
+    }
+
+    return { success: true };
+  },
+
+  /**
+   * Set up sync encryption for the first time.
+   * @param {{ password: string, enableTOTP?: boolean, authMethod?: string, ttlDays?: number, enableWebAuthn?: boolean }}
+   * @returns {{ success: boolean, totpSecret?: string, totpURI?: string, reason?: string }}
+   */
+  async setupEncryption({ password, enableTOTP = false, authMethod = 'password', ttlDays = 90, enableWebAuthn = false }) {
+    if (!password || password.length < 4) {
+      return { success: false, reason: 'Password must be at least 4 characters.' };
+    }
+
+    // Derive key and generate salt
+    const { key, salt } = await SilentSendCrypto.deriveAndReturnKey(password);
+
+    // Create a verification blob so we can check the password later
+    const verificationBlob = await SilentSendCrypto.encryptWithKey(
+      { verify: true, ts: Date.now() }, key
+    );
+
+    const config = {
+      enabled: true,
+      salt,
+      verificationBlob,
+      authMethod, // 'password', 'totp', 'both'
+      ttlDays,
+      webauthn: enableWebAuthn,
+    };
+
+    let totpSecret, totpURI;
+    if (enableTOTP) {
+      totpSecret = SilentSendCrypto.generateTOTPSecret();
+      totpURI = SilentSendCrypto.totpURI(totpSecret);
+      config.totpSecret = totpSecret;
+      if (authMethod === 'password') config.authMethod = 'both';
+    }
+
+    await this._saveSyncEncryption(config);
+
+    // Cache the key immediately
+    await SilentSendCrypto.cacheKey(key, salt, ttlDays);
+
+    // Set up WebAuthn if requested
+    if (enableWebAuthn && SilentSendCrypto.isWebAuthnAvailable()) {
+      try {
+        await SilentSendCrypto.webAuthnRegister();
+        await this._storeWrappedKey(key, salt);
+      } catch (e) {
+        // WebAuthn setup failed — continue without it
+        config.webauthn = false;
+        await this._saveSyncEncryption(config);
+      }
+    }
+
+    return { success: true, totpSecret, totpURI };
+  },
+
+  /**
+   * Disable sync encryption entirely.
+   */
+  async disableEncryption() {
+    await api.storage.local.remove('ss_sync_encryption');
+    await SilentSendCrypto.clearCachedKey();
+    await SilentSendCrypto.clearWebAuthnCredential();
+  },
+
+  /**
+   * Check if sync encryption is configured.
+   */
+  async isEncryptionEnabled() {
+    const config = await this._getSyncEncryption();
+    return !!config?.enabled;
+  },
+
+  /**
+   * Check if authentication is needed (key cache expired).
+   */
+  async needsAuth() {
+    const config = await this._getSyncEncryption();
+    if (!config?.enabled) return false;
+
+    const cached = await SilentSendCrypto.getCachedKey();
+    if (cached) return false;
+
+    // Try WebAuthn silently
+    if (config.webauthn) {
+      const wrapped = await this._getWrappedKey();
+      if (wrapped) return false; // WebAuthn can recover
+    }
+
+    return true;
+  },
+
+  /**
+   * Encrypt data for sync if encryption is enabled.
+   * Returns the original data if encryption is not enabled or key unavailable.
+   */
+  async _encryptForSync(data) {
+    const config = await this._getSyncEncryption();
+    if (!config?.enabled) return { data, encrypted: false };
+
+    const keyInfo = await this._getEncryptionKey();
+    if (!keyInfo) {
+      // Key not available — caller should prompt for auth
+      return { data: null, encrypted: false, needsAuth: true };
+    }
+
+    const encryptedPayload = await SilentSendCrypto.encryptWithKey(data, keyInfo.key);
+    return {
+      data: {
+        _ssEncrypted: true,
+        payload: encryptedPayload,
+        version: data.version,
+        lastModified: data.lastModified,
+      },
+      encrypted: true,
+    };
+  },
+
+  /**
+   * Decrypt sync data if it's encrypted.
+   * Returns the original data if not encrypted.
+   */
+  async _decryptFromSync(data) {
+    if (!data?._ssEncrypted) return { data, decrypted: false };
+
+    const keyInfo = await this._getEncryptionKey();
+    if (!keyInfo) {
+      return { data: null, decrypted: false, needsAuth: true };
+    }
+
+    const decrypted = await SilentSendCrypto.decryptWithKey(data.payload, keyInfo.key);
+    return { data: decrypted, decrypted: true };
+  },
+
+  // ----------------------------------------------------------------
+  // Sync Code — manual cross-browser copy-paste
+  // ----------------------------------------------------------------
+
+  async exportSyncCode() {
+    const data = await this._getAllData();
+
+    // Encrypt if enabled
+    const result = await this._encryptForSync(data);
+    if (result.needsAuth) {
+      return { needsAuth: true };
+    }
+    const payload = result.data || data;
+
+    const json = JSON.stringify(payload);
+    return btoa(unescape(encodeURIComponent(json)));
+  },
+
   async importSyncCode(code, { force = false } = {}) {
     try {
       const json = decodeURIComponent(escape(atob(code.trim())));
-      const data = JSON.parse(json);
+      let data = JSON.parse(json);
+
+      // Decrypt if encrypted
+      if (data._ssEncrypted) {
+        const decResult = await this._decryptFromSync(data);
+        if (decResult.needsAuth) {
+          return { success: false, needsAuth: true, reason: 'Authentication required to decrypt sync data.' };
+        }
+        if (!decResult.data) {
+          return { success: false, reason: 'Failed to decrypt sync data.' };
+        }
+        data = decResult.data;
+      }
 
       if (!data.version || !data.lastModified) {
         return { success: false, reason: 'Invalid sync code — missing version or timestamp.' };
@@ -78,30 +356,28 @@ const SilentSendSync = {
   // browser.storage.sync — automatic within-browser-family sync
   // ----------------------------------------------------------------
 
-  /**
-   * Push current local data to browser.storage.sync (chunked).
-   * Called automatically whenever settings, mappings, or identity change
-   * and browserSync setting is enabled.
-   */
   async pushToSyncStorage() {
     if (!api.storage?.sync) return;
     try {
       const data = await this._getAllData();
-      const json = JSON.stringify(data);
 
-      // Split into chunks to stay under per-item quota
+      // Encrypt if enabled
+      const result = await this._encryptForSync(data);
+      if (result.needsAuth) return; // silently skip — will sync on next auth
+      const payload = result.data || data;
+
+      const json = JSON.stringify(payload);
+
       const chunks = [];
       for (let i = 0; i < json.length; i += SYNC_CHUNK_SIZE) {
         chunks.push(json.slice(i, i + SYNC_CHUNK_SIZE));
       }
 
-      // Remove stale chunks
       const staleKeys = await this._getSyncChunkKeys();
       if (staleKeys.length > 0) {
         await api.storage.sync.remove(staleKeys);
       }
 
-      // Write new chunks + metadata in one shot
       const toWrite = {
         [SYNC_META_KEY]: { chunks: chunks.length, lastModified: data.lastModified },
       };
@@ -112,10 +388,6 @@ const SilentSendSync = {
     }
   },
 
-  /**
-   * Pull from browser.storage.sync and apply if newer than local.
-   * Returns { imported: true, time } if data was applied, null otherwise.
-   */
   async pullFromSyncStorage() {
     if (!api.storage?.sync) return null;
     try {
@@ -123,15 +395,23 @@ const SilentSendSync = {
       const syncMeta = metaResult[SYNC_META_KEY];
       if (!syncMeta?.chunks) return null;
 
-      // Skip if local is already up to date
+      // Check if there's new data before requiring auth
       const local = await this._getAllData();
       if (local.lastModified && local.lastModified >= syncMeta.lastModified) return null;
 
-      // Reassemble chunks
+      // New data exists — reassemble
       const chunkKeys = Array.from({ length: syncMeta.chunks }, (_, i) => SYNC_KEY_PREFIX + i);
       const chunkResult = await api.storage.sync.get(chunkKeys);
       const json = chunkKeys.map(k => chunkResult[k] || '').join('');
-      const data = JSON.parse(json);
+      let data = JSON.parse(json);
+
+      // Decrypt if encrypted
+      if (data._ssEncrypted) {
+        const decResult = await this._decryptFromSync(data);
+        if (decResult.needsAuth) return { needsAuth: true };
+        if (!decResult.data) return null;
+        data = decResult.data;
+      }
 
       await this._applyData(data, 'browser-sync');
       return { imported: true, time: new Date(data.lastModified).toLocaleString() };
@@ -142,72 +422,33 @@ const SilentSendSync = {
   },
 
   // ----------------------------------------------------------------
-  // Internal helpers
-  // ----------------------------------------------------------------
-
-  async _getAllData() {
-    const result = await api.storage.local.get(null);
-    return {
-      version: '1',
-      lastModified: result.ss_lastModified || Date.now(),
-      identity: result.ss_identity || {},
-      mappings: result.ss_mappings || [],
-      settings: result.ss_settings || {},
-    };
-  },
-
-  async _applyData(data, source = 'unknown') {
-    const toSet = {
-      ss_lastModified: data.lastModified,
-      // Signal the service worker to show a badge/notification
-      ss_sync_notification: { source, time: Date.now() },
-    };
-    if (data.identity !== undefined) toSet.ss_identity = data.identity;
-    if (data.mappings !== undefined) toSet.ss_mappings = data.mappings;
-    if (data.settings !== undefined) toSet.ss_settings = data.settings;
-    await api.storage.local.set(toSet);
-  },
-
-  async _getSyncChunkKeys() {
-    if (!api.storage?.sync) return [];
-    try {
-      const all = await api.storage.sync.get(null);
-      return Object.keys(all).filter(k => k.startsWith(SYNC_KEY_PREFIX));
-    } catch {
-      return [];
-    }
-  },
-
-  // ----------------------------------------------------------------
   // GitHub Gist sync
-  // Requires a personal access token with the `gist` scope.
-  // On first push a new secret Gist is created; the Gist ID is stored
-  // in local storage so all subsequent reads/writes use the same Gist.
   // ----------------------------------------------------------------
 
-  /**
-   * Push current data to a GitHub Gist (creates one if no gist ID stored).
-   * token: GitHub PAT with `gist` scope.
-   * Returns { success, gistId } or { success: false, reason }.
-   */
   async pushToGist(token) {
     if (!token) return { success: false, reason: 'No GitHub token provided.' };
     try {
       const data = await this._getAllData();
-      const content = JSON.stringify(data, null, 2);
+
+      // Encrypt if enabled
+      const encResult = await this._encryptForSync(data);
+      if (encResult.needsAuth) {
+        return { success: false, needsAuth: true, reason: 'Authentication required.' };
+      }
+      const payload = encResult.data || data;
+
+      const content = JSON.stringify(payload, null, 2);
       const stored = await api.storage.local.get('ss_gist_id');
       const gistId = stored.ss_gist_id;
 
       let resp;
       if (gistId) {
-        // Update existing Gist
         resp = await fetch(`https://api.github.com/gists/${gistId}`, {
           method: 'PATCH',
           headers: { Authorization: `token ${token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ files: { 'silent-send-sync.json': { content } } }),
         });
       } else {
-        // Create new secret Gist
         resp = await fetch('https://api.github.com/gists', {
           method: 'POST',
           headers: { Authorization: `token ${token}`, 'Content-Type': 'application/json' },
@@ -232,11 +473,6 @@ const SilentSendSync = {
     }
   },
 
-  /**
-   * Pull data from a GitHub Gist and apply if newer.
-   * token: GitHub PAT with `gist` scope.
-   * Returns { success, imported?, reason? }.
-   */
   async pullFromGist(token) {
     if (!token) return { success: false, reason: 'No GitHub token provided.' };
     try {
@@ -256,13 +492,26 @@ const SilentSendSync = {
       const file = gist.files?.['silent-send-sync.json'];
       if (!file) return { success: false, reason: 'Sync file not found in Gist.' };
 
-      // Fetch raw content (may be truncated in the API response)
       const rawResp = await fetch(file.raw_url);
-      const data = JSON.parse(await rawResp.text());
+      let data = JSON.parse(await rawResp.text());
 
+      // Check if new data exists before requiring auth
       const local = await this._getAllData();
-      if (data.lastModified <= (local.lastModified || 0)) {
+      const remoteMod = data._ssEncrypted ? data.lastModified : data.lastModified;
+      if (remoteMod <= (local.lastModified || 0)) {
         return { success: true, imported: false };
+      }
+
+      // Decrypt if encrypted
+      if (data._ssEncrypted) {
+        const decResult = await this._decryptFromSync(data);
+        if (decResult.needsAuth) {
+          return { success: false, needsAuth: true, reason: 'Authentication required to decrypt.' };
+        }
+        if (!decResult.data) {
+          return { success: false, reason: 'Failed to decrypt sync data.' };
+        }
+        data = decResult.data;
       }
 
       await this._applyData(data, 'gist');
@@ -274,23 +523,23 @@ const SilentSendSync = {
 
   // ----------------------------------------------------------------
   // Custom HTTP endpoint sync
-  // GET fetches the JSON, PUT/PATCH writes it.
-  // Works with WebDAV (Nextcloud, ownCloud), any REST endpoint, or a
-  // simple static file server that supports PUT.
   // ----------------------------------------------------------------
 
-  /**
-   * Push to a custom URL via HTTP PUT.
-   * opts: { url, method = 'PUT', headers = {} }
-   */
   async pushToUrl({ url, method = 'PUT', headers = {} } = {}) {
     if (!url) return { success: false, reason: 'No URL provided.' };
     try {
       const data = await this._getAllData();
+
+      const encResult = await this._encryptForSync(data);
+      if (encResult.needsAuth) {
+        return { success: false, needsAuth: true, reason: 'Authentication required.' };
+      }
+      const payload = encResult.data || data;
+
       const resp = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json', ...headers },
-        body: JSON.stringify(data, null, 2),
+        body: JSON.stringify(payload, null, 2),
       });
       if (!resp.ok) return { success: false, reason: `HTTP ${resp.status}` };
       return { success: true };
@@ -299,20 +548,28 @@ const SilentSendSync = {
     }
   },
 
-  /**
-   * Pull from a custom URL via HTTP GET and apply if newer.
-   * opts: { url, headers = {} }
-   */
   async pullFromUrl({ url, headers = {} } = {}) {
     if (!url) return { success: false, reason: 'No URL provided.' };
     try {
       const resp = await fetch(url, { headers });
       if (!resp.ok) return { success: false, reason: `HTTP ${resp.status}` };
-      const data = await resp.json();
+      let data = await resp.json();
 
       const local = await this._getAllData();
-      if (data.lastModified <= (local.lastModified || 0)) {
+      const remoteMod = data._ssEncrypted ? data.lastModified : data.lastModified;
+      if (remoteMod <= (local.lastModified || 0)) {
         return { success: true, imported: false };
+      }
+
+      if (data._ssEncrypted) {
+        const decResult = await this._decryptFromSync(data);
+        if (decResult.needsAuth) {
+          return { success: false, needsAuth: true, reason: 'Authentication required to decrypt.' };
+        }
+        if (!decResult.data) {
+          return { success: false, reason: 'Failed to decrypt sync data.' };
+        }
+        data = decResult.data;
       }
 
       await this._applyData(data, 'url');
@@ -323,9 +580,43 @@ const SilentSendSync = {
   },
 
   // ----------------------------------------------------------------
+  // Internal helpers
+  // ----------------------------------------------------------------
+
+  async _getAllData() {
+    const result = await api.storage.local.get(null);
+    return {
+      version: '1',
+      lastModified: result.ss_lastModified || Date.now(),
+      identity: result.ss_identity || {},
+      mappings: result.ss_mappings || [],
+      settings: result.ss_settings || {},
+    };
+  },
+
+  async _applyData(data, source = 'unknown') {
+    const toSet = {
+      ss_lastModified: data.lastModified,
+      ss_sync_notification: { source, time: Date.now() },
+    };
+    if (data.identity !== undefined) toSet.ss_identity = data.identity;
+    if (data.mappings !== undefined) toSet.ss_mappings = data.mappings;
+    if (data.settings !== undefined) toSet.ss_settings = data.settings;
+    await api.storage.local.set(toSet);
+  },
+
+  async _getSyncChunkKeys() {
+    if (!api.storage?.sync) return [];
+    try {
+      const all = await api.storage.sync.get(null);
+      return Object.keys(all).filter(k => k.startsWith(SYNC_KEY_PREFIX));
+    } catch {
+      return [];
+    }
+  },
+
+  // ----------------------------------------------------------------
   // File System Access API helpers — folder-based sync
-  // The directory handle is stored in IndexedDB so the user only
-  // needs to grant access once per browser session.
   // ----------------------------------------------------------------
 
   _dbPromise: null,

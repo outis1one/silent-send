@@ -100,6 +100,92 @@
       <h2>Sync Between Browsers</h2>
       <p class="section-desc">Keep your identities, mappings, and settings in sync across browsers.</p>
 
+      <!-- Sync Encryption -->
+      <div style="margin-bottom:20px;padding:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
+        <h3 style="font-size:13px;font-weight:600;margin:0 0 8px;display:flex;align-items:center;gap:6px">
+          <span>&#128274;</span> Sync Encryption
+        </h3>
+        <p class="section-desc" style="margin-bottom:10px">
+          Encrypt your sync data with a password, TOTP, or both. Authentication is only required when new data arrives and your cached key has expired.
+        </p>
+
+        <div id="syncEncryptionSetup">
+          <!-- Shown when encryption is NOT set up -->
+          <div id="encryptionNotConfigured">
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+                <div style="flex:1;min-width:160px">
+                  <label style="font-size:11px;color:#6b7280;display:block;margin-bottom:2px">Password</label>
+                  <input type="password" id="syncEncPassword" placeholder="Encryption password" autocomplete="new-password"
+                    style="width:100%;box-sizing:border-box;font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px">
+                </div>
+                <div style="flex:1;min-width:160px">
+                  <label style="font-size:11px;color:#6b7280;display:block;margin-bottom:2px">Confirm Password</label>
+                  <input type="password" id="syncEncPasswordConfirm" placeholder="Confirm password" autocomplete="new-password"
+                    style="width:100%;box-sizing:border-box;font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px">
+                </div>
+              </div>
+              <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+                <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer">
+                  <input type="checkbox" id="syncEncTOTP"> Enable TOTP (authenticator app)
+                </label>
+                <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer" id="syncEncWebAuthnLabel">
+                  <input type="checkbox" id="syncEncWebAuthn"> Biometric/PIN re-auth
+                </label>
+                <div style="display:flex;align-items:center;gap:4px">
+                  <label style="font-size:12px;white-space:nowrap">Re-auth every</label>
+                  <select id="syncEncTTL" style="font-size:12px;padding:3px 6px;border:1px solid #d1d5db;border-radius:4px">
+                    <option value="0">Each session</option>
+                    <option value="30">30 days</option>
+                    <option value="90" selected>90 days</option>
+                    <option value="180">180 days</option>
+                    <option value="365">1 year</option>
+                    <option value="-1">Never</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <button class="btn btn-primary" id="btnSetupEncryption">Enable Encryption</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Shown when encryption IS set up -->
+          <div id="encryptionConfigured" style="display:none">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span style="font-size:12px;color:#10b981;font-weight:500">&#10003; Encryption active</span>
+              <span id="encryptionInfo" style="font-size:11px;color:#6b7280"></span>
+              <button class="btn btn-sm" id="btnChangeEncPassword">Change Password</button>
+              <button class="btn btn-sm btn-danger" id="btnDisableEncryption">Disable</button>
+            </div>
+          </div>
+
+          <!-- Auth prompt (shown when key cache expired and sync needs decryption) -->
+          <div id="syncAuthPrompt" style="display:none;margin-top:10px;padding:10px;background:#fffbeb;border:1px solid #fcd34d;border-radius:6px">
+            <p style="font-size:12px;font-weight:500;margin:0 0 8px;color:#92400e">Authentication required — new sync data is available</p>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+              <input type="password" id="syncAuthPassword" placeholder="Password" autocomplete="current-password"
+                style="flex:1;min-width:120px;font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px">
+              <input type="text" id="syncAuthTOTP" placeholder="TOTP code" autocomplete="one-time-code" inputmode="numeric" maxlength="6"
+                style="width:80px;font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;display:none">
+              <button class="btn btn-primary btn-sm" id="btnSyncAuth">Unlock</button>
+              <button class="btn btn-sm" id="btnSyncAuthBiometric" style="display:none">Biometric</button>
+            </div>
+            <div id="syncAuthStatus" style="font-size:11px;margin-top:4px;min-height:14px"></div>
+          </div>
+
+          <!-- TOTP setup result -->
+          <div id="totpSetupResult" style="display:none;margin-top:10px;padding:10px;background:#f0fdf4;border:1px solid #86efac;border-radius:6px">
+            <p style="font-size:12px;font-weight:500;margin:0 0 6px;color:#166534">TOTP Secret — save this in your authenticator app:</p>
+            <code id="totpSecretDisplay" style="font-size:13px;font-weight:600;letter-spacing:2px;display:block;margin-bottom:6px;word-break:break-all"></code>
+            <p style="font-size:11px;color:#6b7280;margin:0">Or use the otpauth URI: <code id="totpURIDisplay" style="font-size:10px;word-break:break-all"></code></p>
+            <button class="btn btn-sm" id="btnDismissTOTP" style="margin-top:8px">Done — I've saved it</button>
+          </div>
+        </div>
+
+        <div id="syncEncStatus" style="font-size:12px;margin-top:6px;min-height:14px"></div>
+      </div>
+
       <div class="setting-row">
         <div>
           <label>Browser account sync</label>

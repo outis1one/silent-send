@@ -25,6 +25,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderDomains();
   renderLog();
 
+  // --- Sync Encryption UI ---
+  await initSyncEncryptionUI();
+
   // --- Sync section ---
   $('#browserSync').addEventListener('change', async (e) => {
     await Storage.saveSettings({ browserSync: e.target.checked });
@@ -38,6 +41,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   $('#btnGenerateSyncCode').addEventListener('click', async () => {
     const code = await SilentSendSync.exportSyncCode();
+    if (code?.needsAuth) {
+      setSyncStatus('Authentication required to encrypt sync code.', 'warn');
+      showSyncAuthPrompt();
+      return;
+    }
     const data = await SilentSendSync._getAllData();
     $('#syncCodeText').value = code;
     $('#syncCodeDisplay').style.display = 'block';
@@ -69,7 +77,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!code) return;
     const force = $('#syncForce').checked;
     const result = await SilentSendSync.importSyncCode(code, { force });
-    if (result.success) {
+    if (result.needsAuth) {
+      setSyncStatus('Authentication required to decrypt this sync code.', 'warn');
+      showSyncAuthPrompt();
+    } else if (result.success) {
       setSyncStatus(`Imported successfully (data from ${result.importTime}).`, 'ok');
       $('#syncImportSection').style.display = 'none';
       $('#syncImportText').value = '';
@@ -136,7 +147,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!token) { setGistSyncStatus('Enter your GitHub PAT first.', 'warn'); return; }
     setGistSyncStatus('Pushing…', 'neutral');
     const r = await SilentSendSync.pushToGist(token);
-    if (r.success) {
+    if (r.needsAuth) {
+      setGistSyncStatus('Authentication required to encrypt.', 'warn');
+      showSyncAuthPrompt();
+    } else if (r.success) {
       setGistSyncStatus(`Pushed. Gist ID: ${r.gistId.slice(0, 12)}…`, 'ok');
     } else {
       setGistSyncStatus('Push failed: ' + r.reason, 'error');
@@ -148,7 +162,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!token) { setGistSyncStatus('Enter your GitHub PAT first.', 'warn'); return; }
     setGistSyncStatus('Pulling…', 'neutral');
     const r = await SilentSendSync.pullFromGist(token);
-    if (!r.success) {
+    if (r.needsAuth) {
+      setGistSyncStatus('Authentication required to decrypt.', 'warn');
+      showSyncAuthPrompt();
+    } else if (!r.success) {
       setGistSyncStatus('Pull failed: ' + r.reason, 'error');
     } else if (r.imported) {
       setGistSyncStatus(`Pulled (${r.time}). Refreshing…`, 'ok');
@@ -169,7 +186,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     const headers = parseHeadersField($('#customSyncHeaders').value);
     setUrlSyncStatus('Pushing…', 'neutral');
     const r = await SilentSendSync.pushToUrl({ url, headers });
-    if (r.success) {
+    if (r.needsAuth) {
+      setUrlSyncStatus('Authentication required to encrypt.', 'warn');
+      showSyncAuthPrompt();
+    } else if (r.success) {
       setUrlSyncStatus('Pushed successfully.', 'ok');
     } else {
       setUrlSyncStatus('Push failed: ' + r.reason, 'error');
@@ -182,7 +202,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     const headers = parseHeadersField($('#customSyncHeaders').value);
     setUrlSyncStatus('Pulling…', 'neutral');
     const r = await SilentSendSync.pullFromUrl({ url, headers });
-    if (!r.success) {
+    if (r.needsAuth) {
+      setUrlSyncStatus('Authentication required to decrypt.', 'warn');
+      showSyncAuthPrompt();
+    } else if (!r.success) {
       setUrlSyncStatus('Pull failed: ' + r.reason, 'error');
     } else if (r.imported) {
       setUrlSyncStatus(`Pulled (${r.time}). Refreshing…`, 'ok');
@@ -604,17 +627,21 @@ async function pickSyncFolder() {
 async function writeToSyncFile() {
   if (!syncDirHandle) return;
   try {
-    // Re-verify permission is still granted (required after browser restart)
     const perm = await syncDirHandle.requestPermission({ mode: 'readwrite' });
     if (perm !== 'granted') return;
 
     const data = await SilentSendSync._getAllData();
+
+    // Encrypt if enabled
+    const encResult = await SilentSendSync._encryptForSync(data);
+    if (encResult.needsAuth) return; // skip silently — will sync after auth
+    const payload = encResult.data || data;
+
     const fileHandle = await syncDirHandle.getFileHandle(SYNC_FILE_NAME, { create: true });
     const writable = await fileHandle.createWritable();
-    await writable.write(JSON.stringify(data, null, 2));
+    await writable.write(JSON.stringify(payload, null, 2));
     await writable.close();
   } catch (e) {
-    // Permission denied or folder removed — don't spam errors
     console.warn('[Silent Send] writeToSyncFile failed:', e.message);
   }
 }
@@ -623,32 +650,48 @@ async function checkFileSyncUpdate() {
   if (!syncDirHandle) return;
   try {
     const perm = await syncDirHandle.queryPermission({ mode: 'readwrite' });
-    if (perm === 'prompt') {
-      // Need a user gesture to re-request — skip silently
-      return;
-    }
+    if (perm === 'prompt') return;
     if (perm !== 'granted') return;
 
     const fileHandle = await syncDirHandle.getFileHandle(SYNC_FILE_NAME);
     const file = await fileHandle.getFile();
-    const data = JSON.parse(await file.text());
+    let data = JSON.parse(await file.text());
 
-    if (!data.version || !data.lastModified) return;
+    // Check timestamp before requiring auth
+    const remoteMod = data.lastModified;
+    if (!remoteMod) return;
 
     const local = await SilentSendSync._getAllData();
-    if (data.lastModified > (local.lastModified || 0)) {
-      await SilentSendSync._applyData(data, 'file');
-      mappings = await Storage.getMappings();
-      settings = await Storage.getSettings();
-      $('#browserSync').checked = settings.browserSync === true;
-      renderMappings();
-      renderDomains();
-      renderLog();
-      setFileSyncStatus(
-        'Auto-synced from folder (' + new Date(data.lastModified).toLocaleString() + ').',
-        'ok'
-      );
+    if (remoteMod <= (local.lastModified || 0)) return;
+
+    // New data exists — decrypt if encrypted
+    if (data._ssEncrypted) {
+      const decResult = await SilentSendSync._decryptFromSync(data);
+      if (decResult.needsAuth) {
+        setFileSyncStatus('New sync data available — authentication required.', 'warn');
+        showSyncAuthPrompt();
+        return;
+      }
+      if (!decResult.data) {
+        setFileSyncStatus('Failed to decrypt sync file.', 'error');
+        return;
+      }
+      data = decResult.data;
     }
+
+    if (!data.version) return;
+
+    await SilentSendSync._applyData(data, 'file');
+    mappings = await Storage.getMappings();
+    settings = await Storage.getSettings();
+    $('#browserSync').checked = settings.browserSync === true;
+    renderMappings();
+    renderDomains();
+    renderLog();
+    setFileSyncStatus(
+      'Auto-synced from folder (' + new Date(data.lastModified).toLocaleString() + ').',
+      'ok'
+    );
   } catch (e) {
     if (e.name !== 'NotFoundError') {
       console.warn('[Silent Send] checkFileSyncUpdate failed:', e.message);
@@ -704,6 +747,235 @@ function parseHeadersField(val) {
 
 function setSyncStatus(msg, type) {
   const el = $('#syncStatus');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = type === 'ok' ? '#10b981' : type === 'warn' ? '#f59e0b' : type === 'error' ? '#dc2626' : '#6b7280';
+}
+
+// ----------------------------------------------------------------
+// Sync Encryption UI
+// ----------------------------------------------------------------
+
+async function initSyncEncryptionUI() {
+  const isEnabled = await SilentSendSync.isEncryptionEnabled();
+
+  if (isEnabled) {
+    showEncryptionConfigured();
+  } else {
+    showEncryptionNotConfigured();
+  }
+
+  // Hide WebAuthn option if not available
+  if (!SilentSendCrypto.isWebAuthnAvailable()) {
+    const label = $('#syncEncWebAuthnLabel');
+    if (label) label.style.display = 'none';
+  }
+
+  // Setup encryption button
+  $('#btnSetupEncryption').addEventListener('click', async () => {
+    const password = $('#syncEncPassword').value;
+    const confirm = $('#syncEncPasswordConfirm').value;
+
+    if (!password) {
+      setSyncEncStatus('Enter a password.', 'warn');
+      return;
+    }
+    if (password !== confirm) {
+      setSyncEncStatus('Passwords do not match.', 'error');
+      return;
+    }
+
+    const enableTOTP = $('#syncEncTOTP').checked;
+    const enableWebAuthn = $('#syncEncWebAuthn').checked;
+    const ttlDays = parseInt($('#syncEncTTL').value, 10);
+
+    setSyncEncStatus('Setting up encryption...', 'neutral');
+
+    const result = await SilentSendSync.setupEncryption({
+      password,
+      enableTOTP,
+      authMethod: enableTOTP ? 'both' : 'password',
+      ttlDays,
+      enableWebAuthn,
+    });
+
+    if (!result.success) {
+      setSyncEncStatus('Setup failed: ' + result.reason, 'error');
+      return;
+    }
+
+    // Show TOTP secret if enabled
+    if (result.totpSecret) {
+      $('#totpSecretDisplay').textContent = result.totpSecret;
+      $('#totpURIDisplay').textContent = result.totpURI;
+      $('#totpSetupResult').style.display = 'block';
+    }
+
+    // Clear password fields
+    $('#syncEncPassword').value = '';
+    $('#syncEncPasswordConfirm').value = '';
+
+    showEncryptionConfigured();
+    setSyncEncStatus('Encryption enabled. All sync data will be encrypted.', 'ok');
+  });
+
+  // Dismiss TOTP setup
+  $('#btnDismissTOTP').addEventListener('click', () => {
+    $('#totpSetupResult').style.display = 'none';
+  });
+
+  // Disable encryption
+  $('#btnDisableEncryption').addEventListener('click', async () => {
+    if (!window.confirm('Disable sync encryption? Existing encrypted sync data will become unreadable.')) return;
+    await SilentSendSync.disableEncryption();
+    showEncryptionNotConfigured();
+    setSyncEncStatus('Encryption disabled.', 'neutral');
+  });
+
+  // Change password
+  $('#btnChangeEncPassword').addEventListener('click', async () => {
+    const oldPassword = window.prompt('Enter current password:');
+    if (!oldPassword) return;
+
+    // Verify old password
+    const authResult = await SilentSendSync.authenticate(oldPassword);
+    if (!authResult.success) {
+      setSyncEncStatus('Wrong current password.', 'error');
+      return;
+    }
+
+    const newPassword = window.prompt('Enter new password:');
+    if (!newPassword) return;
+    const confirmNew = window.prompt('Confirm new password:');
+    if (newPassword !== confirmNew) {
+      setSyncEncStatus('New passwords do not match.', 'error');
+      return;
+    }
+
+    // Get current config to preserve TOTP and other settings
+    const config = await SilentSendSync._getSyncEncryption();
+    const result = await SilentSendSync.setupEncryption({
+      password: newPassword,
+      enableTOTP: !!config.totpSecret,
+      authMethod: config.authMethod,
+      ttlDays: config.ttlDays,
+      enableWebAuthn: config.webauthn,
+    });
+
+    if (result.success) {
+      setSyncEncStatus('Password changed successfully.', 'ok');
+    } else {
+      setSyncEncStatus('Failed: ' + result.reason, 'error');
+    }
+  });
+
+  // Auth prompt — Unlock button
+  $('#btnSyncAuth').addEventListener('click', async () => {
+    const password = $('#syncAuthPassword').value;
+    const totpCode = $('#syncAuthTOTP').value;
+
+    if (!password) {
+      setSyncAuthStatus('Enter your password.', 'warn');
+      return;
+    }
+
+    const result = await SilentSendSync.authenticate(password, totpCode || undefined);
+    if (result.success) {
+      $('#syncAuthPrompt').style.display = 'none';
+      $('#syncAuthPassword').value = '';
+      $('#syncAuthTOTP').value = '';
+      setSyncEncStatus('Authenticated. Sync data unlocked.', 'ok');
+    } else {
+      setSyncAuthStatus(result.reason, 'error');
+    }
+  });
+
+  // Auth prompt — Biometric button
+  $('#btnSyncAuthBiometric').addEventListener('click', async () => {
+    setSyncAuthStatus('Waiting for biometric...', 'neutral');
+    const verified = await SilentSendCrypto.webAuthnAuthenticate();
+    if (verified) {
+      // Try to recover wrapped key
+      const wrapped = await SilentSendSync._getWrappedKey();
+      if (wrapped) {
+        const config = await SilentSendSync._getSyncEncryption();
+        const ttlDays = config?.ttlDays ?? 90;
+        await SilentSendCrypto.cacheKey(wrapped.key, wrapped.salt, ttlDays);
+        $('#syncAuthPrompt').style.display = 'none';
+        setSyncEncStatus('Authenticated via biometric. Sync data unlocked.', 'ok');
+      } else {
+        setSyncAuthStatus('Biometric verified but key not found. Enter password.', 'warn');
+      }
+    } else {
+      setSyncAuthStatus('Biometric verification failed.', 'error');
+    }
+  });
+}
+
+async function showEncryptionConfigured() {
+  $('#encryptionNotConfigured').style.display = 'none';
+  $('#encryptionConfigured').style.display = 'block';
+
+  const config = await SilentSendSync._getSyncEncryption();
+  if (config) {
+    const parts = [];
+    if (config.authMethod === 'both') parts.push('Password + TOTP');
+    else if (config.authMethod === 'totp') parts.push('TOTP');
+    else parts.push('Password');
+
+    if (config.webauthn) parts.push('Biometric');
+
+    const ttl = config.ttlDays === -1 ? 'never re-auth'
+      : config.ttlDays === 0 ? 'each session'
+      : `every ${config.ttlDays}d`;
+    parts.push(ttl);
+
+    $('#encryptionInfo').textContent = `(${parts.join(' · ')})`;
+  }
+
+  // Check if auth is currently needed
+  const needsAuth = await SilentSendSync.needsAuth();
+  if (needsAuth) {
+    showSyncAuthPrompt();
+  }
+}
+
+function showEncryptionNotConfigured() {
+  $('#encryptionNotConfigured').style.display = 'block';
+  $('#encryptionConfigured').style.display = 'none';
+  $('#syncAuthPrompt').style.display = 'none';
+  $('#totpSetupResult').style.display = 'none';
+}
+
+async function showSyncAuthPrompt() {
+  const config = await SilentSendSync._getSyncEncryption();
+  $('#syncAuthPrompt').style.display = 'block';
+
+  // Show TOTP field if needed
+  if (config?.totpSecret) {
+    $('#syncAuthTOTP').style.display = '';
+  } else {
+    $('#syncAuthTOTP').style.display = 'none';
+  }
+
+  // Show biometric button if available
+  if (config?.webauthn && SilentSendCrypto.isWebAuthnAvailable()) {
+    const hasCred = await SilentSendCrypto.hasWebAuthnCredential();
+    $('#btnSyncAuthBiometric').style.display = hasCred ? '' : 'none';
+  } else {
+    $('#btnSyncAuthBiometric').style.display = 'none';
+  }
+}
+
+function setSyncEncStatus(msg, type) {
+  const el = $('#syncEncStatus');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = type === 'ok' ? '#10b981' : type === 'warn' ? '#f59e0b' : type === 'error' ? '#dc2626' : '#6b7280';
+}
+
+function setSyncAuthStatus(msg, type) {
+  const el = $('#syncAuthStatus');
   if (!el) return;
   el.textContent = msg;
   el.style.color = type === 'ok' ? '#10b981' : type === 'warn' ? '#f59e0b' : type === 'error' ? '#dc2626' : '#6b7280';

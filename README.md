@@ -290,4 +290,4 @@ src/
 
 ## License
 
-[MIT](LICENSE) — use it for anything, commercial or personal, modify it, redistribute it, relicense it. Just keep the copyright notice in copies of the code.
+[Business Source License 1.1](LICENSE) — free for personal, non-commercial use. Commercial use requires a paid license. The code automatically converts to MIT on March 26, 2030.

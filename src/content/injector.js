@@ -38,14 +38,36 @@
     script.onload = () => script.remove();
 
     // Listen for substitution events from the page script
-    window.addEventListener('message', (event) => {
+    window.addEventListener('message', async (event) => {
       if (event.source !== window) return;
       if (event.data?.type === 'ss:substitution-performed') {
+        // Try to notify background for badge update
         api.runtime.sendMessage({
           type: 'substitution:performed',
           count: event.data.count,
           replacements: event.data.replacements,
         }).catch(() => {});
+
+        // Also log directly from the injector (content script world)
+        // in case the background worker is asleep
+        const replacements = event.data.replacements || [];
+        for (const r of replacements) {
+          const log = (await api.storage.local.get('ss_activity_log')).ss_activity_log || [];
+          log.unshift({
+            id: crypto.randomUUID(),
+            timestamp: Date.now(),
+            type: 'substitution',
+            direction: 'outbound',
+            original: r.original,
+            replaced: r.replaced,
+            category: r.category || 'general',
+            pattern: r.pattern || '',
+            url: location.href,
+          });
+          // Trim
+          if (log.length > 200) log.length = 200;
+          await api.storage.local.set({ ss_activity_log: log });
+        }
       }
     });
 

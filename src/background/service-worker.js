@@ -176,10 +176,10 @@ api.commands.onCommand.addListener(async (command) => {
     settings.revealMode = !settings.revealMode;
     await Storage.saveSettings({ revealMode: settings.revealMode });
 
-    // Broadcast to all tabs
     broadcastSettings(settings);
+    await updateIcon(settings);
 
-    // Show brief badge text
+    // Flash badge text briefly
     const [tab] = await api.tabs.query({ active: true, currentWindow: true });
     if (tab) {
       api.action.setBadgeText({ text: settings.revealMode ? 'EYE' : '', tabId: tab.id });
@@ -188,7 +188,6 @@ api.commands.onCommand.addListener(async (command) => {
         tabId: tab.id,
       });
       if (!settings.revealMode) {
-        // Restore normal badge after a moment
         setTimeout(() => updateBadge(tab.id), 1500);
       }
     }
@@ -199,8 +198,9 @@ api.commands.onCommand.addListener(async (command) => {
     await Storage.saveSettings({ enabled: settings.enabled });
 
     broadcastSettings(settings);
+    await updateIcon(settings);
 
-    // Flash badge
+    // Flash badge text briefly
     const [tab] = await api.tabs.query({ active: true, currentWindow: true });
     if (tab) {
       api.action.setBadgeText({ text: settings.enabled ? 'ON' : 'OFF', tabId: tab.id });
@@ -230,7 +230,78 @@ async function broadcastSettings(settings) {
   }
 }
 
-// --- Set initial badge state ---
-api.runtime.onInstalled.addListener(() => {
-  api.action.setBadgeBackgroundColor({ color: '#6b7280' });
+// --- Dynamic Icon Colors ---
+// Green = active, Blue = reveal mode, Red = disabled, Gray = unconfigured
+
+function generateIcon(color, size) {
+  const canvas = new OffscreenCanvas(size, size);
+  const ctx = canvas.getContext('2d');
+
+  // Rounded rect background
+  const r = size * 0.19;
+  ctx.beginPath();
+  ctx.moveTo(r, 0);
+  ctx.lineTo(size - r, 0);
+  ctx.quadraticCurveTo(size, 0, size, r);
+  ctx.lineTo(size, size - r);
+  ctx.quadraticCurveTo(size, size, size - r, size);
+  ctx.lineTo(r, size);
+  ctx.quadraticCurveTo(0, size, 0, size - r);
+  ctx.lineTo(0, r);
+  ctx.quadraticCurveTo(0, 0, r, 0);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+
+  // "SS" text
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `bold ${size * 0.44}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('SS', size / 2, size / 2 + size * 0.03);
+
+  return ctx.getImageData(0, 0, size, size);
+}
+
+async function updateIcon(settings) {
+  let color;
+  if (!settings.enabled) {
+    color = '#dc2626'; // red — disabled
+  } else if (settings.revealMode) {
+    color = '#1d4ed8'; // blue — reveal mode
+  } else {
+    color = '#111111'; // dark — normal active
+  }
+
+  try {
+    const imageData = {
+      16: generateIcon(color, 16),
+      32: generateIcon(color, 32),
+      48: generateIcon(color, 48),
+    };
+    await api.action.setIcon({ imageData });
+  } catch (e) {
+    // OffscreenCanvas may not be available in all contexts
+  }
+}
+
+// Update icon when settings change
+api.storage.onChanged.addListener(async (changes) => {
+  if (changes.ss_settings) {
+    const settings = { ...(changes.ss_settings.newValue || {}) };
+    await updateIcon(settings);
+  }
 });
+
+// --- Set initial state ---
+api.runtime.onInstalled.addListener(async () => {
+  api.action.setBadgeBackgroundColor({ color: '#6b7280' });
+  const settings = await Storage.getSettings();
+  await updateIcon(settings);
+});
+
+// Also set icon on startup (service worker wake)
+(async () => {
+  const settings = await Storage.getSettings();
+  await updateIcon(settings);
+})();

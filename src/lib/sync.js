@@ -351,7 +351,16 @@ const SilentSendSync = {
 
   /**
    * Encrypt data for sync if encryption is enabled.
-   * Returns the original data if encryption is not enabled or key unavailable.
+   * Embeds the encryption config (salt, TOTP secret, etc.) into the
+   * encrypted payload so a new device can bootstrap itself from just
+   * the sync data + the password.
+   *
+   * Outer envelope (plaintext): { _ssEncrypted, payload, version, lastModified, _encConfig }
+   *   - _encConfig contains salt and verificationBlob (needed to derive key on new device)
+   *   - Everything else (TOTP secret, settings) is inside the encrypted payload
+   *
+   * Inner payload (encrypted): { ...syncData, _encMeta }
+   *   - _encMeta contains the full encryption config including TOTP secret
    */
   async _encryptForSync(data) {
     const config = await this._getSyncEncryption();
@@ -359,17 +368,33 @@ const SilentSendSync = {
 
     const keyInfo = await this._getEncryptionKey();
     if (!keyInfo) {
-      // Key not available — caller should prompt for auth
       return { data: null, encrypted: false, needsAuth: true };
     }
 
-    const encryptedPayload = await SilentSendCrypto.encryptWithKey(data, keyInfo.key);
+    // Embed encryption config inside the encrypted payload
+    // so new devices can bootstrap their local config after decryption
+    const innerData = {
+      ...data,
+      _encMeta: {
+        authMethod: config.authMethod,
+        ttlDays: config.ttlDays,
+        webauthn: config.webauthn,
+        totpSecret: config.totpSecret || null,
+      },
+    };
+
+    const encryptedPayload = await SilentSendCrypto.encryptWithKey(innerData, keyInfo.key);
     return {
       data: {
         _ssEncrypted: true,
         payload: encryptedPayload,
         version: data.version,
         lastModified: data.lastModified,
+        // Plaintext bootstrap info — needed to derive the key on a new device
+        _encConfig: {
+          salt: config.salt,
+          verificationBlob: config.verificationBlob,
+        },
       },
       encrypted: true,
     };
@@ -377,10 +402,27 @@ const SilentSendSync = {
 
   /**
    * Decrypt sync data if it's encrypted.
-   * Returns the original data if not encrypted.
+   * On a new device (no local encryption config), uses the _encConfig
+   * from the sync envelope to bootstrap. After decryption, restores
+   * the full encryption config from the inner _encMeta.
    */
   async _decryptFromSync(data) {
     if (!data?._ssEncrypted) return { data, decrypted: false };
+
+    // If this device has no encryption config yet, bootstrap from the sync envelope
+    let config = await this._getSyncEncryption();
+    if (!config?.enabled && data._encConfig) {
+      // Save minimal config so authenticate() can work
+      config = {
+        enabled: true,
+        salt: data._encConfig.salt,
+        verificationBlob: data._encConfig.verificationBlob,
+        authMethod: 'password', // will be updated from _encMeta after decryption
+        ttlDays: 90,
+        webauthn: false,
+      };
+      await this._saveSyncEncryption(config);
+    }
 
     const keyInfo = await this._getEncryptionKey();
     if (!keyInfo) {
@@ -388,6 +430,22 @@ const SilentSendSync = {
     }
 
     const decrypted = await SilentSendCrypto.decryptWithKey(data.payload, keyInfo.key);
+
+    // Restore full encryption config from inner metadata
+    if (decrypted._encMeta) {
+      const fullConfig = await this._getSyncEncryption();
+      if (fullConfig) {
+        fullConfig.authMethod = decrypted._encMeta.authMethod || fullConfig.authMethod;
+        fullConfig.ttlDays = decrypted._encMeta.ttlDays ?? fullConfig.ttlDays;
+        fullConfig.webauthn = decrypted._encMeta.webauthn ?? fullConfig.webauthn;
+        if (decrypted._encMeta.totpSecret) {
+          fullConfig.totpSecret = decrypted._encMeta.totpSecret;
+        }
+        await this._saveSyncEncryption(fullConfig);
+      }
+      delete decrypted._encMeta;
+    }
+
     return { data: decrypted, decrypted: true };
   },
 

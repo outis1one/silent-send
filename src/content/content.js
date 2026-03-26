@@ -850,10 +850,9 @@
         if (result.replacements.length > 0 && !result.skipped) {
           let uploadFile = result.file;
 
-          // If preview was shown and confirmed, and we have a _zip,
-          // build the final ZIP now
-          if (result._zip && result._modified) {
-            uploadFile = writeZipFile(result._zip);
+          // If preview was confirmed and we have sanitized text, use it
+          if (result._sanitizedText) {
+            uploadFile = new Blob([result._sanitizedText], { type: 'text/plain' });
           }
 
           const newFile = new File([uploadFile], result.filename || value.name, {
@@ -891,156 +890,112 @@
   }
 
   /**
-   * Scan a document file for PPI using the inline document scanner.
+   * Scan a document file for PPI. Strategy: extract text from any
+   * format, substitute PPI, upload as plaintext. The AI extracts text
+   * from files anyway — no need to preserve formatting in a file
+   * the user never gets back. Original stays untouched on disk.
+   *
+   * Supported: PDF, DOCX, DOC, XLSX, XLS, ODT, ODS, ODP, PPTX, RTF,
+   * and all text/code formats.
    */
   async function documentScan(file, filename, options) {
-    // Detect file type
     const ext = (filename || '').split('.').pop().toLowerCase();
-    const isText = /^(txt|csv|tsv|json|md|log|yaml|yml|xml|html|css|js|ts|py|sh|sql|rb|go|rs|java|c|cpp|h|php)$/.test(ext);
-    const isPDF = ext === 'pdf';
-    const isDOCX = ext === 'docx';
-    const isXLSX = ext === 'xlsx';
 
-    if (isText) {
+    // Plain text formats — direct substitution, keep original extension
+    const textExts = new Set(['txt','csv','tsv','json','md','markdown','log',
+      'yaml','yml','toml','ini','cfg','conf','xml','html','htm','css',
+      'js','ts','py','rb','go','rs','java','c','cpp','h','hpp','sh',
+      'bash','zsh','ps1','bat','sql','r','swift','kt','scala','pl','php',
+      'lua','vim','env','gitignore']);
+
+    if (textExts.has(ext)) {
       const text = await file.text();
       const result = substituteAll(text);
       if (result.modified) {
         return {
           file: new Blob([result.text], { type: file.type || 'text/plain' }),
-          filename,
-          replacements: result.replacements,
+          filename, replacements: result.replacements,
         };
       }
       return { file, filename, replacements: [] };
     }
 
-    if (isPDF) {
-      // Extract text and scan — create clean text version
-      try {
-        const text = await extractPDFTextSimple(file);
-        if (!text || text.trim().length < 5) {
-          return { file, filename, replacements: [], skipped: true,
-            reason: 'No extractable text (scanned/image PDF)' };
-        }
-        const result = substituteAll(text);
-        const preview = {
-          format: 'pdf', replacementCount: result.replacements.length,
-          replacements: result.replacements.slice(0, 15),
-          note: 'PDF will be converted to plain text (layout not preserved)',
-        };
-        if (options.previewMode && result.replacements.length > 0) {
-          return { file, filename, replacements: result.replacements, preview };
-        }
-        if (result.modified) {
-          return {
-            file: new Blob([result.text], { type: 'text/plain' }),
-            filename: filename.replace(/\.pdf$/i, '.txt'),
-            replacements: result.replacements, preview,
-          };
-        }
-        return { file, filename, replacements: [] };
-      } catch (e) {
-        return { file, filename, replacements: [], skipped: true, reason: e.message };
-      }
+    // Binary document formats — extract text, substitute, upload as .txt
+    const docExts = new Set(['pdf','docx','doc','xlsx','xls','odt','ods',
+      'odp','rtf','pptx']);
+
+    if (!docExts.has(ext)) {
+      return { file, filename, replacements: [], skipped: true };
     }
 
-    // DOCX/XLSX — full in-place replacement via ZIP rewrite
-    if (isDOCX || isXLSX) {
-      try {
-        const zip = await readZipFile(file);
-        let totalReplacements = [];
-        let modified = false;
+    try {
+      const text = await extractTextFromDocument(file, ext);
 
-        // Identify XML files containing text
-        const targetFiles = isDOCX
-          ? Object.keys(zip.entries).filter(name =>
-              /^word\/(document|header\d*|footer\d*|comments|endnotes|footnotes)\.xml$/.test(name))
-          : Object.keys(zip.entries).filter(name =>
-              name === 'xl/sharedStrings.xml' ||
-              /^xl\/worksheets\/sheet\d+\.xml$/.test(name));
-
-        for (const xmlPath of targetFiles) {
-          const entry = zip.entries[xmlPath];
-          if (!entry) continue;
-
-          let xmlContent;
-          try {
-            let data = entry.rawData;
-            if (entry.compMethod === 8) {
-              data = await inflateData(data);
-              if (!data) continue;
-            }
-            xmlContent = new TextDecoder('utf-8').decode(data);
-          } catch { continue; }
-
-          // Substitute text between XML tags, preserving tags
-          const { xml: newXml, replacements } = substituteInXML(xmlContent);
-
-          if (replacements.length > 0) {
-            zip.entries[xmlPath] = {
-              ...entry,
-              _modified: true,
-              _newData: new TextEncoder().encode(newXml),
-            };
-            totalReplacements.push(...replacements);
-            modified = true;
-          }
-        }
-
-        if (!modified && !options.previewMode) {
-          return { file, filename, replacements: [] };
-        }
-
-        const preview = {
-          format: ext,
-          replacementCount: totalReplacements.length,
-          replacements: totalReplacements.slice(0, 15),
-          note: isDOCX
-            ? 'Text in document body, headers, and footers will be substituted. Formatting preserved.'
-            : 'Cell values and shared strings will be substituted. Formatting and formulas preserved.',
-        };
-
-        if (options.previewMode && totalReplacements.length > 0) {
-          // Return preview first — actual replacement happens after user confirms
-          return { file, filename, replacements: totalReplacements, preview,
-            _zip: zip, _modified: modified };
-        }
-
-        if (modified) {
-          const newBlob = writeZipFile(zip);
-          return {
-            file: newBlob,
-            filename,
-            replacements: totalReplacements,
-            preview,
-          };
-        }
-        return { file, filename, replacements: [] };
-      } catch (e) {
-        console.warn('[Silent Send] DOCX/XLSX processing failed:', e);
-        return { file, filename, replacements: [], skipped: true, reason: e.message };
+      if (!text || text.trim().length < 5) {
+        return { file, filename, replacements: [], skipped: true,
+          reason: `No extractable text in ${ext.toUpperCase()} (may be scanned/image-only)` };
       }
-    }
 
-    return { file, filename, replacements: [], skipped: true };
+      const result = substituteAll(text);
+      const preview = {
+        format: ext,
+        replacementCount: result.replacements.length,
+        replacements: result.replacements.slice(0, 15),
+        note: `${ext.toUpperCase()} text extracted and sanitized for upload`,
+      };
+
+      if (options.previewMode && result.replacements.length > 0) {
+        return { file, filename, replacements: result.replacements, preview,
+          _sanitizedText: result.text };
+      }
+
+      if (result.modified) {
+        return {
+          file: new Blob([result.text], { type: 'text/plain' }),
+          filename: filename.replace(/\.[^.]+$/, '.txt'),
+          replacements: result.replacements, preview,
+        };
+      }
+      return { file, filename, replacements: [] };
+    } catch (e) {
+      console.warn(`[Silent Send] ${ext.toUpperCase()} processing failed:`, e);
+      return { file, filename, replacements: [], skipped: true, reason: e.message };
+    }
   }
 
   /**
-   * Simple PDF text extraction from content streams.
+   * Extract text from any supported document format.
    */
-  async function extractPDFTextSimple(file) {
+  async function extractTextFromDocument(file, ext) {
+    switch (ext) {
+      case 'pdf': return extractPDFText(file);
+      case 'docx': case 'xlsx': case 'pptx':
+      case 'odt': case 'ods': case 'odp':
+        return extractZipXMLText(file, ext);
+      case 'doc': case 'xls':
+        return extractOldBinaryText(file);
+      case 'rtf':
+        return extractRTFText(file);
+      default: return '';
+    }
+  }
+
+  /** PDF: extract text from content stream operators (Tj, TJ). */
+  async function extractPDFText(file) {
     const buffer = await file.arrayBuffer();
     const str = new TextDecoder('latin1').decode(new Uint8Array(buffer));
     const texts = [];
     const re = /stream\r?\n([\s\S]*?)endstream/g;
     let m;
     while ((m = re.exec(str)) !== null) {
-      // Extract text operators: (text) Tj, [(text)...] TJ
       const content = m[1];
       const parts = [];
       const tj = /\(([^)]*)\)\s*Tj/g;
       let t;
-      while ((t = tj.exec(content)) !== null) parts.push(t[1]);
+      while ((t = tj.exec(content)) !== null) {
+        parts.push(t[1].replace(/\\([nrt\\()])/g, (_, c) =>
+          c === 'n' ? '\n' : c === 'r' ? '\r' : c === 't' ? '\t' : c));
+      }
       const tjArr = /\[(.*?)\]\s*TJ/g;
       while ((t = tjArr.exec(content)) !== null) {
         const inner = /\(([^)]*)\)/g;
@@ -1052,140 +1007,113 @@
     return texts.join('\n');
   }
 
-  // ============================================================
-  // ZIP Read/Write — inline for page world (no module imports)
-  // Handles DOCX (ZIP of XML) and XLSX (ZIP of XML) files.
-  // ============================================================
-
-  async function readZipFile(file) {
+  /**
+   * DOCX/XLSX/PPTX/ODT/ODS/ODP: extract text from ZIP XML entries.
+   */
+  async function extractZipXMLText(file, ext) {
     const buffer = await file.arrayBuffer();
     const bytes = new Uint8Array(buffer);
-    const entries = {};
+    const texts = [];
 
-    // Find end of central directory
-    let eocdOff = -1;
-    for (let i = bytes.length - 22; i >= 0; i--) {
-      if (bytes[i] === 0x50 && bytes[i+1] === 0x4b &&
-          bytes[i+2] === 0x05 && bytes[i+3] === 0x06) {
-        eocdOff = i; break;
+    // Scan for ZIP local file headers
+    let pos = 0;
+    while (pos < bytes.length - 30) {
+      if (bytes[pos] !== 0x50 || bytes[pos+1] !== 0x4b ||
+          bytes[pos+2] !== 0x03 || bytes[pos+3] !== 0x04) {
+        pos++; continue;
       }
+      const view = new DataView(buffer, pos);
+      const compMethod = view.getUint16(8, true);
+      const compSize = view.getUint32(18, true);
+      const nameLen = view.getUint16(26, true);
+      const extraLen = view.getUint16(28, true);
+      const name = new TextDecoder().decode(bytes.slice(pos + 30, pos + 30 + nameLen));
+      const dataStart = pos + 30 + nameLen + extraLen;
+      const rawData = bytes.slice(dataStart, dataStart + compSize);
+
+      if (isTextXML(name, ext) && compSize > 0) {
+        let xmlStr;
+        try {
+          if (compMethod === 8) {
+            const dec = await inflateData(rawData);
+            xmlStr = dec ? new TextDecoder('utf-8').decode(dec) : null;
+          } else if (compMethod === 0) {
+            xmlStr = new TextDecoder('utf-8').decode(rawData);
+          }
+        } catch { /* skip */ }
+        if (xmlStr) {
+          const re2 = />([^<]+)</g;
+          let m2;
+          while ((m2 = re2.exec(xmlStr)) !== null) {
+            const t = m2[1].trim();
+            if (t.length >= 2 && !/^[\x00-\x1f]+$/.test(t)) texts.push(t);
+          }
+        }
+      }
+      pos = dataStart + compSize;
     }
-    if (eocdOff === -1) throw new Error('Not a valid ZIP');
-
-    const dv = new DataView(buffer);
-    const cdOff = dv.getUint32(eocdOff + 16, true);
-    const cdCount = dv.getUint16(eocdOff + 10, true);
-
-    let off = cdOff;
-    for (let i = 0; i < cdCount; i++) {
-      if (dv.getUint32(off, true) !== 0x02014b50) break;
-      const compMethod = dv.getUint16(off + 10, true);
-      const crc32 = dv.getUint32(off + 16, true);
-      const compSize = dv.getUint32(off + 20, true);
-      const uncompSize = dv.getUint32(off + 24, true);
-      const nameLen = dv.getUint16(off + 28, true);
-      const extraLen = dv.getUint16(off + 30, true);
-      const commentLen = dv.getUint16(off + 32, true);
-      const localOff = dv.getUint32(off + 42, true);
-      const name = new TextDecoder().decode(bytes.slice(off + 46, off + 46 + nameLen));
-
-      const lNameLen = dv.getUint16(localOff + 26, true);
-      const lExtraLen = dv.getUint16(localOff + 28, true);
-      const dataOff = localOff + 30 + lNameLen + lExtraLen;
-
-      entries[name] = {
-        compMethod, crc32, compSize, uncompSize,
-        rawData: bytes.slice(dataOff, dataOff + compSize),
-      };
-
-      off += 46 + nameLen + extraLen + commentLen;
-    }
-
-    return { entries, _buffer: buffer };
+    return texts.join(' ');
   }
 
-  function writeZipFile(zip) {
-    const parts = [];
-    const cdEntries = [];
-    let offset = 0;
-
-    for (const [name, entry] of Object.entries(zip.entries)) {
-      const nameBytes = new TextEncoder().encode(name);
-      let data;
-      let compMethod;
-
-      if (entry._modified && entry._newData) {
-        // Modified — store uncompressed
-        data = entry._newData;
-        compMethod = 0; // stored
-      } else {
-        // Unmodified — keep original
-        data = entry.rawData;
-        compMethod = entry.compMethod;
-      }
-
-      const uncompSize = entry._modified ? data.length : entry.uncompSize;
-      const compSize = data.length;
-
-      // Local file header (30 + name)
-      const lh = new Uint8Array(30 + nameBytes.length);
-      const lv = new DataView(lh.buffer);
-      lv.setUint32(0, 0x04034b50, true);
-      lv.setUint16(4, 20, true);
-      lv.setUint16(8, compMethod, true);
-      lv.setUint32(18, compSize, true);
-      lv.setUint32(22, uncompSize, true);
-      lv.setUint16(26, nameBytes.length, true);
-      lh.set(nameBytes, 30);
-
-      // Central directory entry (46 + name)
-      const cd = new Uint8Array(46 + nameBytes.length);
-      const cv = new DataView(cd.buffer);
-      cv.setUint32(0, 0x02014b50, true);
-      cv.setUint16(4, 20, true);
-      cv.setUint16(6, 20, true);
-      cv.setUint16(10, compMethod, true);
-      cv.setUint32(20, compSize, true);
-      cv.setUint32(24, uncompSize, true);
-      cv.setUint16(28, nameBytes.length, true);
-      cv.setUint32(42, offset, true);
-      cd.set(nameBytes, 46);
-
-      cdEntries.push(cd);
-      parts.push(lh, data);
-      offset += lh.length + data.length;
+  function isTextXML(name, ext) {
+    switch (ext) {
+      case 'docx': return /^word\/(document|header|footer|comments|endnotes|footnotes)/i.test(name);
+      case 'xlsx': return name === 'xl/sharedStrings.xml' || /^xl\/worksheets\/sheet/i.test(name);
+      case 'pptx': return /^ppt\/slides\/slide/i.test(name);
+      case 'odt': case 'odp': return name === 'content.xml' || name === 'styles.xml';
+      case 'ods': return name === 'content.xml';
+      default: return name.endsWith('.xml');
     }
-
-    const cdStart = offset;
-    let cdSize = 0;
-    for (const cd of cdEntries) {
-      parts.push(cd);
-      cdSize += cd.length;
-    }
-
-    const eocd = new Uint8Array(22);
-    const ev = new DataView(eocd.buffer);
-    ev.setUint32(0, 0x06054b50, true);
-    ev.setUint16(8, cdEntries.length, true);
-    ev.setUint16(10, cdEntries.length, true);
-    ev.setUint32(12, cdSize, true);
-    ev.setUint32(16, cdStart, true);
-    parts.push(eocd);
-
-    return new Blob(parts, { type: 'application/octet-stream' });
   }
 
-  /**
-   * Decompress DEFLATE data using DecompressionStream API.
-   */
+  /** Old binary .doc/.xls: extract readable text runs. */
+  async function extractOldBinaryText(file) {
+    const buffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    const texts = [];
+    // UTF-16LE extraction (Word stores text as UTF-16)
+    let cur = '';
+    for (let i = 0; i < bytes.length - 1; i += 2) {
+      const code = bytes[i] | (bytes[i + 1] << 8);
+      if (code >= 32 && code < 127) { cur += String.fromCharCode(code); }
+      else { if (cur.length >= 3) texts.push(cur); cur = ''; }
+    }
+    if (cur.length >= 3) texts.push(cur);
+    // ASCII fallback
+    cur = '';
+    for (let i = 0; i < bytes.length; i++) {
+      if (bytes[i] >= 32 && bytes[i] < 127) { cur += String.fromCharCode(bytes[i]); }
+      else { if (cur.length >= 4) texts.push(cur); cur = ''; }
+    }
+    if (cur.length >= 4) texts.push(cur);
+    const seen = new Set();
+    return texts.filter(t => {
+      if (seen.has(t)) return false;
+      seen.add(t);
+      return t.includes(' ') || t.length >= 8;
+    }).join(' ');
+  }
+
+  /** RTF: strip formatting, extract text. */
+  async function extractRTFText(file) {
+    const text = await file.text();
+    return text
+      .replace(/\{\\[^{}]*\}/g, '')
+      .replace(/\\[a-z]+\d*\s?/gi, '')
+      .replace(/[{}]/g, '')
+      .replace(/\\\\/g, '\\')
+      .replace(/\\\'([0-9a-f]{2})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+      .trim();
+  }
+
+  /** Decompress DEFLATE data using DecompressionStream API. */
   async function inflateData(data) {
     if (typeof DecompressionStream === 'undefined') return null;
     try {
       const ds = new DecompressionStream('deflate');
       const writer = ds.writable.getWriter();
       const reader = ds.readable.getReader();
-      writer.write(data);
-      writer.close();
+      writer.write(data); writer.close();
       const chunks = [];
       while (true) {
         const { done, value } = await reader.read();
@@ -1194,34 +1122,13 @@
       }
       const total = chunks.reduce((s, c) => s + c.length, 0);
       const result = new Uint8Array(total);
-      let pos = 0;
-      for (const c of chunks) { result.set(c, pos); pos += c.length; }
+      let p = 0;
+      for (const c of chunks) { result.set(c, p); p += c.length; }
       return result;
     } catch { return null; }
   }
 
-  /**
-   * Find text between XML tags and apply substitution.
-   * Preserves all XML structure — only modifies text content.
-   */
-  function substituteInXML(xml) {
-    const allReplacements = [];
-    const newXml = xml.replace(/>([^<]+)</g, (match, textContent) => {
-      if (!textContent || textContent.trim().length < 2) return match;
-      const result = substituteAll(textContent);
-      if (result.modified) {
-        allReplacements.push(...result.replacements);
-        return '>' + result.text + '<';
-      }
-      return match;
-    });
-    return { xml: newXml, replacements: allReplacements };
-  }
-
-  // ============================================================
   // Document Scan Preview UI
-  // ============================================================
-
   let docPreviewEl = null;
 
   function showDocScanPreview(preview, filename) {
@@ -1231,7 +1138,6 @@
         docPreviewEl.className = 'ss-doc-preview';
         document.body.appendChild(docPreviewEl);
       }
-
       const items = (preview.replacements || []).map(r =>
         `<div class="ss-dp-item">
           <code class="ss-dp-orig">${(r.original || '').length > 25 ? r.original.slice(0, 22) + '...' : r.original}</code>
@@ -1252,30 +1158,20 @@
           <button class="ss-dp-btn ss-dp-cancel">Upload Original</button>
         </div>
       `;
-
       docPreviewEl.classList.add('visible');
-
       const confirm = docPreviewEl.querySelector('.ss-dp-confirm');
       const cancel = docPreviewEl.querySelector('.ss-dp-cancel');
-
       const cleanup = () => {
         docPreviewEl.classList.remove('visible');
         confirm.removeEventListener('click', onConfirm);
         cancel.removeEventListener('click', onCancel);
       };
-
       const onConfirm = () => { cleanup(); resolve(true); };
       const onCancel = () => { cleanup(); resolve(false); };
-
       confirm.addEventListener('click', onConfirm);
       cancel.addEventListener('click', onCancel);
-
-      // Auto-dismiss after 30 seconds (upload original)
       setTimeout(() => {
-        if (docPreviewEl.classList.contains('visible')) {
-          cleanup();
-          resolve(false);
-        }
+        if (docPreviewEl.classList.contains('visible')) { cleanup(); resolve(false); }
       }, 30000);
     });
   }

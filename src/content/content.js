@@ -1651,7 +1651,7 @@
         ${settings.autoAddDetected !== false
           ? `<button class="ss-ps-add" data-real="${encodeURIComponent(w.value)}" data-fake="${encodeURIComponent(fake)}" data-cat="${w.category}" title="Add mapping: ${displayVal} → ${fake}">+</button>`
           : ''}
-        <button class="ss-ps-ignore" data-value="${encodeURIComponent(w.value)}" title="Ignore — stop flagging this value">&#10005;</button>
+        <button class="ss-ps-ignore" data-value="${encodeURIComponent(w.value)}" title="Never flag this value again">ignore</button>
       </div>`;
     }).join('');
 

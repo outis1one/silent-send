@@ -222,21 +222,17 @@
 
 .ss-ps-ignore {
   background: none;
-  border: 1px solid #6b7280;
-  border-radius: 4px;
-  color: #9ca3af;
-  font-size: 11px;
-  width: 24px;
-  height: 24px;
+  border: none;
+  color: #6b7280;
+  font-size: 9px;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   flex-shrink: 0;
-  padding: 0;
+  padding: 2px 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
-.ss-ps-ignore:hover { background: rgba(156, 163, 175, 0.15); color: #e5e7eb; }
+.ss-ps-ignore:hover { color: #e5e7eb; text-decoration: underline; }
 
 /* Floating reveal mode indicator */
 .ss-reveal-badge {

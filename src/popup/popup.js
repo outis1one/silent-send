@@ -191,81 +191,164 @@ function renderProfileSelector() {
   $('#profileActive').checked = profile?.active ?? true;
 }
 
-// --- Identity ---
+// --- Identity (dynamic multi-entry) ---
+
+// Field configs for rendering
+const FIELD_CONFIGS = {
+  names: {
+    container: 'idNames',
+    placeholderReal: 'Real name',
+    placeholderSub: 'Fake name',
+    typeOptions: [{ value: 'first', label: '1st' }, { value: 'last', label: 'Last' }, { value: 'middle', label: 'Mid' }, { value: 'nick', label: 'Nick' }],
+    defaultType: 'first',
+  },
+  emails: {
+    container: 'idEmails',
+    placeholderReal: 'you@gmail.com',
+    placeholderSub: 'fake@example.com',
+  },
+  usernames: {
+    container: 'idUsernames',
+    placeholderReal: 'jsmith',
+    placeholderSub: 'ademo',
+  },
+  hostnames: {
+    container: 'idHostnames',
+    placeholderReal: 'macbook-pro',
+    placeholderSub: 'mycomputer',
+  },
+  phones: {
+    container: 'idPhones',
+    placeholderReal: '(555) 123-4567',
+    placeholderSub: '(555) 000-0000',
+  },
+};
+
+function renderFieldList(fieldName, items) {
+  const config = FIELD_CONFIGS[fieldName];
+  const container = $(`#${config.container}`);
+  if (!container) return;
+
+  if (!items || items.length === 0) {
+    // Show one empty row
+    items = [{ real: '', substitute: '', type: config.defaultType || '' }];
+  }
+
+  container.innerHTML = items.map((item, i) => {
+    let typeHtml = '';
+    if (config.typeOptions) {
+      typeHtml = `<select class="id-type-select" data-index="${i}" style="padding:3px 2px;font-size:10px;border:1px solid #e5e7eb;border-radius:3px;width:42px">` +
+        config.typeOptions.map(o =>
+          `<option value="${o.value}" ${item.type === o.value ? 'selected' : ''}>${o.label}</option>`
+        ).join('') +
+        `</select>`;
+    }
+    return `<div class="id-entry-row" data-index="${i}">
+      ${typeHtml}
+      <input type="text" class="input input-sm id-real" value="${escapeAttr(item.real || '')}" placeholder="${config.placeholderReal}">
+      <span class="arrow" style="font-size:12px">&rarr;</span>
+      <input type="text" class="input input-sm id-sub" value="${escapeAttr(item.substitute || '')}" placeholder="${config.placeholderSub}">
+      <button class="btn-remove" title="Remove">&times;</button>
+    </div>`;
+  }).join('');
+
+  // Bind remove buttons
+  container.querySelectorAll('.btn-remove').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const row = btn.closest('.id-entry-row');
+      if (container.querySelectorAll('.id-entry-row').length > 1) {
+        row.remove();
+      } else {
+        // Clear instead of remove if it's the last row
+        row.querySelectorAll('input').forEach(inp => inp.value = '');
+      }
+    });
+  });
+}
+
 function loadIdentityForm() {
   const profile = profiles.find(p => p.id === currentProfileId);
   if (!profile) return;
 
-  const first = (profile.names || []).find(n => n.type === 'first');
-  const last = (profile.names || []).find(n => n.type === 'last');
-  const email = (profile.emails || [])[0];
-  const user = (profile.usernames || [])[0];
-  const host = (profile.hostnames || [])[0];
-  const phone = (profile.phones || [])[0];
-
-  $('#idFirstReal').value = first?.real || '';
-  $('#idFirstSub').value = first?.substitute || '';
-  $('#idLastReal').value = last?.real || '';
-  $('#idLastSub').value = last?.substitute || '';
-  $('#idEmailReal').value = email?.real || '';
-  $('#idEmailSub').value = email?.substitute || '';
+  renderFieldList('names', profile.names || []);
+  renderFieldList('emails', profile.emails || []);
+  renderFieldList('usernames', profile.usernames || []);
+  renderFieldList('hostnames', profile.hostnames || []);
+  renderFieldList('phones', profile.phones || []);
   $('#idCatchAllEmail').value = profile.catchAllEmail || '';
-  $('#idUserReal').value = user?.real || '';
-  $('#idUserSub').value = user?.substitute || '';
-  $('#idHostReal').value = host?.real || '';
-  $('#idHostSub').value = host?.substitute || '';
-  $('#idPhoneReal').value = phone?.real || '';
-  $('#idPhoneSub').value = phone?.substitute || '';
   $('#profileActive').checked = profile.active ?? true;
+
+  // Bind add buttons
+  $$('.btn-add').forEach(btn => {
+    // Remove old listeners by cloning
+    const newBtn = btn.cloneNode(true);
+    btn.replaceWith(newBtn);
+    newBtn.addEventListener('click', () => {
+      const field = newBtn.dataset.field;
+      const config = FIELD_CONFIGS[field];
+      const container = $(`#${config.container}`);
+      const count = container.querySelectorAll('.id-entry-row').length;
+      const tempDiv = document.createElement('div');
+      let typeHtml = '';
+      if (config.typeOptions) {
+        // Alternate: if first row is 'first', next should be 'last', etc.
+        const defaultType = count % 2 === 0 ? 'first' : 'last';
+        typeHtml = `<select class="id-type-select" data-index="${count}" style="padding:3px 2px;font-size:10px;border:1px solid #e5e7eb;border-radius:3px;width:42px">` +
+          config.typeOptions.map(o =>
+            `<option value="${o.value}" ${o.value === defaultType ? 'selected' : ''}>${o.label}</option>`
+          ).join('') +
+          `</select>`;
+      }
+      tempDiv.innerHTML = `<div class="id-entry-row" data-index="${count}">
+        ${typeHtml}
+        <input type="text" class="input input-sm id-real" placeholder="${config.placeholderReal}">
+        <span class="arrow" style="font-size:12px">&rarr;</span>
+        <input type="text" class="input input-sm id-sub" placeholder="${config.placeholderSub}">
+        <button class="btn-remove" title="Remove">&times;</button>
+      </div>`;
+      const row = tempDiv.firstElementChild;
+      container.appendChild(row);
+      row.querySelector('.btn-remove').addEventListener('click', () => {
+        if (container.querySelectorAll('.id-entry-row').length > 1) row.remove();
+        else row.querySelectorAll('input').forEach(inp => inp.value = '');
+      });
+      row.querySelector('.id-real').focus();
+    });
+  });
+}
+
+function escapeAttr(str) {
+  return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+// Read entries from a dynamic field list
+function readFieldEntries(fieldName) {
+  const config = FIELD_CONFIGS[fieldName];
+  const container = $(`#${config.container}`);
+  if (!container) return [];
+
+  const entries = [];
+  container.querySelectorAll('.id-entry-row').forEach(row => {
+    const real = row.querySelector('.id-real')?.value.trim() || '';
+    const sub = row.querySelector('.id-sub')?.value.trim() || '';
+    if (real && sub) {
+      const entry = { real, substitute: sub };
+      const typeSelect = row.querySelector('.id-type-select');
+      if (typeSelect) entry.type = typeSelect.value;
+      entries.push(entry);
+    }
+  });
+
+  return entries;
 }
 
 async function saveIdentity() {
-  const names = [];
-  const firstReal = $('#idFirstReal').value.trim();
-  const firstSub = $('#idFirstSub').value.trim();
-  if (firstReal && firstSub) {
-    names.push({ real: firstReal, substitute: firstSub, type: 'first' });
-  }
-  const lastReal = $('#idLastReal').value.trim();
-  const lastSub = $('#idLastSub').value.trim();
-  if (lastReal && lastSub) {
-    names.push({ real: lastReal, substitute: lastSub, type: 'last' });
-  }
-
-  const emails = [];
-  const emailReal = $('#idEmailReal').value.trim();
-  const emailSub = $('#idEmailSub').value.trim();
-  if (emailReal && emailSub) {
-    emails.push({ real: emailReal, substitute: emailSub });
-  }
-
-  const usernames = [];
-  const userReal = $('#idUserReal').value.trim();
-  const userSub = $('#idUserSub').value.trim();
-  if (userReal && userSub) {
-    usernames.push({ real: userReal, substitute: userSub });
-  }
-
-  const hostnames = [];
-  const hostReal = $('#idHostReal').value.trim();
-  const hostSub = $('#idHostSub').value.trim();
-  if (hostReal && hostSub) {
-    hostnames.push({ real: hostReal, substitute: hostSub });
-  }
-
-  const phones = [];
-  const phoneReal = $('#idPhoneReal').value.trim();
-  const phoneSub = $('#idPhoneSub').value.trim();
-  if (phoneReal && phoneSub) {
-    phones.push({ real: phoneReal, substitute: phoneSub });
-  }
-
   const profileData = {
-    names,
-    emails,
-    usernames,
-    hostnames,
-    phones,
+    names: readFieldEntries('names'),
+    emails: readFieldEntries('emails'),
+    usernames: readFieldEntries('usernames'),
+    hostnames: readFieldEntries('hostnames'),
+    phones: readFieldEntries('phones'),
     catchAllEmail: $('#idCatchAllEmail').value.trim(),
     emailDomains: [],
     enabled: { emails: true, names: true, usernames: true, phones: true, paths: true },

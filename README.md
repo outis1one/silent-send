@@ -60,12 +60,47 @@ A browser extension (Chrome + Firefox) that intercepts personal information and 
 | `123-45-6789` | `[REDACTED-SSN]` |
 | `4111 1111 1111 1111` | `[REDACTED-CARD]` |
 
+## First-time setup
+
+After installing the extension, **it does nothing until you configure it**. The icon will be gray to remind you.
+
+1. Click the Silent Send icon in your toolbar
+2. You'll see the **Identity** tab with a red "Setup required" banner
+3. Fill in your real info and fake substitutes:
+   - **Names** — add as many as needed (first, last, nicknames). Click "+ Add" for more rows.
+   - **Emails** — your real email → fake email. Set a catch-all for unknown addresses.
+   - **Usernames** — your system username → fake username
+   - **Hostnames** — your computer name → fake computer name
+   - **Phones** — your phone number → fake number
+4. Click **Save Identity**
+5. The icon turns **black** — you're now protected
+
+You can create multiple profiles (Personal, Work, Spouse) using the dropdown at the top. Each can be toggled on/off independently.
+
+### Icon colors
+
+| Icon color | Meaning |
+|-----------|---------|
+| **Gray** | Not configured — does nothing until you set up your identity |
+| **Black** | Active and protecting |
+| **Blue** | Reveal mode on — showing your real data in AI responses |
+| **Red** | Manually disabled |
+
+### Keyboard shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Alt+Shift+R` | Toggle reveal mode |
+| `Alt+Shift+S` | Toggle Silent Send on/off |
+
+Remap in Chrome: `chrome://extensions/shortcuts` | Firefox: `about:addons` → gear → Manage Extension Shortcuts
+
 ## How to verify it's working
 
 - **Badge count** on the extension icon shows substitutions per page
 - **Activity tab** in the popup shows a timestamped log of every substitution
 - **Test tab** in the popup lets you type text and see the before/after diff live
-- **Reveal mode** (eye icon) toggles showing real vs substitute data in responses
+- **Reveal mode** (eye icon or `Alt+Shift+R`) shows your real data in AI responses for easy copy/paste
 - **Browser DevTools** → Console shows `[Silent Send] Substituted N value(s)` messages
 
 ## Installation

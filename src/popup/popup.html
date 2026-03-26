@@ -60,55 +60,35 @@
       <p class="help-text">Each profile is a person/identity. All active profiles are protected simultaneously.</p>
 
       <div class="id-section">
-        <div class="id-label">Names</div>
-        <div class="id-row">
-          <input type="text" id="idFirstReal" placeholder="First name" class="input input-sm">
-          <span class="arrow">&rarr;</span>
-          <input type="text" id="idFirstSub" placeholder="Fake first" class="input input-sm">
-        </div>
-        <div class="id-row">
-          <input type="text" id="idLastReal" placeholder="Last name" class="input input-sm">
-          <span class="arrow">&rarr;</span>
-          <input type="text" id="idLastSub" placeholder="Fake last" class="input input-sm">
-        </div>
+        <div class="id-label-row"><span class="id-label">Names</span><button class="btn-add" data-field="names">+ Add</button></div>
+        <div id="idNames"></div>
         <div class="id-hint">Catches: first last, last first, possessives, case variants</div>
       </div>
 
       <div class="id-section">
-        <div class="id-label">Email</div>
+        <div class="id-label-row"><span class="id-label">Emails</span><button class="btn-add" data-field="emails">+ Add</button></div>
+        <div id="idEmails"></div>
         <div class="id-row">
-          <input type="email" id="idEmailReal" placeholder="you@gmail.com" class="input input-sm">
-          <span class="arrow">&rarr;</span>
-          <input type="email" id="idEmailSub" placeholder="fake@example.com" class="input input-sm">
-        </div>
-        <div class="id-row">
-          <input type="email" id="idCatchAllEmail" placeholder="Catch-all email (for unknown addresses)" class="input" style="flex:1">
+          <input type="email" id="idCatchAllEmail" placeholder="Catch-all email (for any unrecognized address)" class="input" style="flex:1">
         </div>
         <div class="id-hint">Catches: any *@gmail.com, *@yahoo.com, *@outlook.com, etc.</div>
       </div>
 
       <div class="id-section">
-        <div class="id-label">Username / Computer</div>
-        <div class="id-row">
-          <input type="text" id="idUserReal" placeholder="jsmith" class="input input-sm">
-          <span class="arrow">&rarr;</span>
-          <input type="text" id="idUserSub" placeholder="ademo" class="input input-sm">
-        </div>
-        <div class="id-row">
-          <input type="text" id="idHostReal" placeholder="macbook-pro" class="input input-sm">
-          <span class="arrow">&rarr;</span>
-          <input type="text" id="idHostSub" placeholder="mycomputer" class="input input-sm">
-        </div>
-        <div class="id-hint">Catches: jsmith@macbook-pro, /home/jsmith, ~jsmith, C:\Users\jsmith</div>
+        <div class="id-label-row"><span class="id-label">Usernames</span><button class="btn-add" data-field="usernames">+ Add</button></div>
+        <div id="idUsernames"></div>
+        <div class="id-hint">Catches: user@host, /home/user, ~user, C:\Users\user</div>
       </div>
 
       <div class="id-section">
-        <div class="id-label">Phone</div>
-        <div class="id-row">
-          <input type="text" id="idPhoneReal" placeholder="(555) 123-4567" class="input input-sm">
-          <span class="arrow">&rarr;</span>
-          <input type="text" id="idPhoneSub" placeholder="(555) 000-0000" class="input input-sm">
-        </div>
+        <div class="id-label-row"><span class="id-label">Hostnames</span><button class="btn-add" data-field="hostnames">+ Add</button></div>
+        <div id="idHostnames"></div>
+        <div class="id-hint">Catches: hostname in user@hostname and standalone</div>
+      </div>
+
+      <div class="id-section">
+        <div class="id-label-row"><span class="id-label">Phones</span><button class="btn-add" data-field="phones">+ Add</button></div>
+        <div id="idPhones"></div>
         <div class="id-hint">Catches: all formats — (555) 123-4567, 555-123-4567, 555.123.4567</div>
       </div>
 

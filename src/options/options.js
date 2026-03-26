@@ -10,6 +10,7 @@ import api from '../lib/browser-polyfill.js';
 
 let mappings = [];
 let settings = {};
+let passwordsRevealed = false;
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -27,6 +28,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('#browserSync').checked = settings.browserSync === true;
 
   renderMappings();
+  renderPasswords();
   renderDomains();
   renderLog();
 
@@ -326,6 +328,36 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderMappings();
   });
 
+  // Password reveal/hide
+  $('#btnRevealPasswords').addEventListener('click', async () => {
+    const pw = $('#passwordRevealKey').value;
+    if (!pw) {
+      setPasswordRevealStatus('Enter your vault password.', 'warn');
+      return;
+    }
+    const result = await SilentSendSync.authenticate(pw);
+    if (result.success) {
+      passwordsRevealed = true;
+      $('#passwordsLocked').style.display = 'none';
+      $('#passwordsUnlocked').style.display = 'block';
+      $('#passwordRevealKey').value = '';
+      renderPasswords();
+    } else {
+      setPasswordRevealStatus('Wrong password.', 'error');
+    }
+  });
+
+  $('#btnHidePasswords').addEventListener('click', () => {
+    passwordsRevealed = false;
+    $('#passwordsLocked').style.display = 'block';
+    $('#passwordsUnlocked').style.display = 'none';
+    renderPasswords();
+  });
+
+  $('#passwordRevealKey').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') $('#btnRevealPasswords').click();
+  });
+
   // Clear log
   $('#btnClearLog').addEventListener('click', async () => {
     await Storage.clearLog();
@@ -369,13 +401,15 @@ async function addMapping() {
 
 function renderMappings() {
   const tbody = $('#mappingTableBody');
+  // Exclude password-category mappings — they have their own section
+  const nonPasswordMappings = mappings.filter(m => m.category !== 'password');
 
-  if (mappings.length === 0) {
+  if (nonPasswordMappings.length === 0) {
     tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:24px">No mappings configured</td></tr>';
     return;
   }
 
-  tbody.innerHTML = mappings
+  tbody.innerHTML = nonPasswordMappings
     .map(
       (m) => `
     <tr data-id="${m.id}">
@@ -413,6 +447,69 @@ function renderMappings() {
       if (m) m.enabled = cb.checked;
     });
   });
+}
+
+// --- Passwords Section ---
+
+function renderPasswords() {
+  const passwordMappings = mappings.filter(m => m.category === 'password');
+  const tbody = $('#passwordTableBody');
+  const noMsg = $('#noPasswordsMsg');
+
+  if (passwordMappings.length === 0) {
+    tbody.innerHTML = '';
+    noMsg.style.display = 'block';
+    return;
+  }
+
+  noMsg.style.display = 'none';
+
+  tbody.innerHTML = passwordMappings.map(m => {
+    const displayReal = passwordsRevealed
+      ? escapeHtml(m.real)
+      : '&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;';
+
+    return `
+    <tr data-id="${m.id}">
+      <td class="real" style="font-family:monospace;font-size:12px">${displayReal}</td>
+      <td class="sub" style="font-size:12px">${escapeHtml(m.substitute)}</td>
+      <td>
+        <label class="toggle" style="width:32px;height:18px">
+          <input type="checkbox" class="toggle-pw-enabled" ${m.enabled ? 'checked' : ''}>
+          <span class="toggle-slider" style="border-radius:18px"></span>
+        </label>
+      </td>
+      <td><button class="btn btn-sm btn-danger btn-delete-pw">&times;</button></td>
+    </tr>`;
+  }).join('');
+
+  // Bind delete
+  tbody.querySelectorAll('.btn-delete-pw').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.closest('tr').dataset.id;
+      await Storage.deleteMapping(id);
+      mappings = mappings.filter(m => m.id !== id);
+      renderPasswords();
+      renderMappings();
+    });
+  });
+
+  // Bind toggle
+  tbody.querySelectorAll('.toggle-pw-enabled').forEach(cb => {
+    cb.addEventListener('change', async () => {
+      const id = cb.closest('tr').dataset.id;
+      await Storage.updateMapping(id, { enabled: cb.checked });
+      const m = mappings.find(m => m.id === id);
+      if (m) m.enabled = cb.checked;
+    });
+  });
+}
+
+function setPasswordRevealStatus(msg, type) {
+  const el = $('#passwordRevealStatus');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = type === 'ok' ? '#10b981' : type === 'warn' ? '#f59e0b' : type === 'error' ? '#dc2626' : '#6b7280';
 }
 
 async function renderLog() {

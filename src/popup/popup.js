@@ -585,7 +585,7 @@ function renderMappings() {
       (m) => `
     <div class="mapping-item" data-id="${m.id}">
       <div class="mapping-values">
-        <span class="mapping-real">${escapeHtml(m.real)}</span>
+        <span class="mapping-real">${m.category === 'password' ? '&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;' : escapeHtml(m.real)}</span>
         &rarr;
         <span class="mapping-sub">${escapeHtml(m.substitute)}</span>
       </div>

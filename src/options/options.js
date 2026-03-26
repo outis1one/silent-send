@@ -2,6 +2,7 @@ import Storage from '../lib/storage.js';
 import SilentSendCrypto from '../lib/crypto.js';
 import SilentSendSync from '../lib/sync.js';
 import VersionHistory from '../lib/version-history.js';
+import ImportParser from '../lib/import-parser.js';
 import SilentSendMerge from '../lib/merge.js';
 import OrgPolicy from '../lib/org-policy.js';
 import TamperGuard from '../lib/tamper-guard.js';
@@ -236,6 +237,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('#btnExportEncrypted').addEventListener('click', exportAllEncrypted);
   $('#btnImportAll').addEventListener('click', () => $('#fileImportAll').click());
   $('#fileImportAll').addEventListener('change', importAll);
+
+  // Bulk import
+  $('#btnBulkImport').addEventListener('click', () => $('#fileBulkImport').click());
+  $('#fileBulkImport').addEventListener('change', handleBulkImport);
+  $('#btnCancelBulkImport').addEventListener('click', () => {
+    $('#bulkImportPreview').style.display = 'none';
+    $('#fileBulkImport').value = '';
+  });
 
   // Custom domains
   $('#btnAddDomain').addEventListener('click', addDomain);
@@ -1495,6 +1504,142 @@ function renderConflicts(conflicts) {
       }
     });
   });
+}
+
+// ----------------------------------------------------------------
+// Bulk Import
+// ----------------------------------------------------------------
+
+let pendingImport = null;
+
+async function handleBulkImport(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  try {
+    const text = await file.text();
+    const result = ImportParser.parse(text, file.name);
+    pendingImport = result;
+
+    // Build summary
+    const parts = [];
+    if (result.identity.names.length) parts.push(`${result.identity.names.length} name(s)`);
+    if (result.identity.emails.length) parts.push(`${result.identity.emails.length} email(s)`);
+    if (result.identity.usernames.length) parts.push(`${result.identity.usernames.length} username(s)`);
+    if (result.identity.phones.length) parts.push(`${result.identity.phones.length} phone(s)`);
+    if (result.mappings.length) parts.push(`${result.mappings.length} mapping(s)`);
+
+    const needsMapping = result.mappings.filter(m => m.needsMapping).length +
+      result.identity.names.filter(n => !n.substitute).length +
+      result.identity.emails.filter(e => !e.substitute).length +
+      result.identity.usernames.filter(u => !u.substitute).length +
+      result.identity.phones.filter(p => !p.substitute).length;
+
+    $('#bulkImportSummary').innerHTML = `
+      Found: ${parts.join(', ')}.
+      ${needsMapping > 0 ? `<span style="color:#b45309">${needsMapping} item(s) need substitutes — you can add them after import.</span>` : ''}
+    `;
+
+    // Build preview list
+    const items = [];
+    for (const n of result.identity.names) {
+      items.push(`<div><span style="color:#6b7280">name:</span> <strong>${escapeHtml(n.real)}</strong>${n.substitute ? ' → ' + escapeHtml(n.substitute) : ' <span style="color:#b45309">needs substitute</span>'}</div>`);
+    }
+    for (const e of result.identity.emails) {
+      items.push(`<div><span style="color:#6b7280">email:</span> <strong>${escapeHtml(e.real)}</strong>${e.substitute ? ' → ' + escapeHtml(e.substitute) : ' <span style="color:#b45309">needs substitute</span>'}</div>`);
+    }
+    for (const u of result.identity.usernames) {
+      items.push(`<div><span style="color:#6b7280">username:</span> <strong>${escapeHtml(u.real)}</strong>${u.substitute ? ' → ' + escapeHtml(u.substitute) : ' <span style="color:#b45309">needs substitute</span>'}</div>`);
+    }
+    for (const p of result.identity.phones) {
+      items.push(`<div><span style="color:#6b7280">phone:</span> <strong>${escapeHtml(p.real)}</strong>${p.substitute ? ' → ' + escapeHtml(p.substitute) : ' <span style="color:#b45309">needs substitute</span>'}</div>`);
+    }
+    for (const m of result.mappings) {
+      items.push(`<div><span style="color:#6b7280">${escapeHtml(m.category)}:</span> <strong>${escapeHtml(m.real)}</strong>${m.substitute ? ' → ' + escapeHtml(m.substitute) : ' <span style="color:#b45309">needs substitute</span>'}</div>`);
+    }
+
+    $('#bulkImportItems').innerHTML = items.slice(0, 50).join('') +
+      (items.length > 50 ? `<div style="color:#6b7280;margin-top:4px">+${items.length - 50} more...</div>` : '');
+
+    $('#bulkImportPreview').style.display = 'block';
+
+    // Wire up apply button
+    $('#btnApplyBulkImport').onclick = applyBulkImport;
+
+    setBulkImportStatus(`Parsed ${file.name} — review and click Apply.`, 'ok');
+  } catch (err) {
+    setBulkImportStatus('Failed to parse: ' + err.message, 'error');
+  }
+
+  e.target.value = '';
+}
+
+async function applyBulkImport() {
+  if (!pendingImport) return;
+
+  const result = pendingImport;
+  let addedCount = 0;
+
+  // Add to identity (first active profile)
+  const profiles = await Storage.getProfiles();
+  if (profiles.length > 0) {
+    const profile = profiles.find(p => p.active) || profiles[0];
+
+    if (result.identity.names.length) {
+      profile.names = [...(profile.names || []), ...result.identity.names];
+      addedCount += result.identity.names.length;
+    }
+    if (result.identity.emails.length) {
+      profile.emails = [...(profile.emails || []), ...result.identity.emails];
+      addedCount += result.identity.emails.length;
+    }
+    if (result.identity.usernames.length) {
+      profile.usernames = [...(profile.usernames || []), ...result.identity.usernames];
+      addedCount += result.identity.usernames.length;
+    }
+    if (result.identity.phones.length) {
+      profile.phones = [...(profile.phones || []), ...result.identity.phones];
+      addedCount += result.identity.phones.length;
+    }
+
+    await Storage.updateProfile(profile.id, profile);
+  }
+
+  // Add mappings
+  for (const m of result.mappings) {
+    await Storage.addMapping({
+      real: m.real,
+      substitute: m.substitute || '',
+      category: m.category || 'general',
+      caseSensitive: false,
+    });
+    addedCount++;
+  }
+
+  // Refresh UI
+  mappings = await Storage.getMappings();
+  renderMappings();
+
+  $('#bulkImportPreview').style.display = 'none';
+  pendingImport = null;
+
+  const needsSubs = result.mappings.filter(m => !m.substitute).length +
+    result.identity.names.filter(n => !n.substitute).length +
+    result.identity.emails.filter(e => !e.substitute).length +
+    result.identity.usernames.filter(u => !u.substitute).length +
+    result.identity.phones.filter(p => !p.substitute).length;
+
+  setBulkImportStatus(
+    `Imported ${addedCount} items.${needsSubs > 0 ? ` ${needsSubs} still need substitutes — check Identity tab and Mappings.` : ''}`,
+    'ok'
+  );
+}
+
+function setBulkImportStatus(msg, type) {
+  const el = $('#bulkImportStatus');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = type === 'ok' ? '#10b981' : type === 'warn' ? '#f59e0b' : type === 'error' ? '#dc2626' : '#6b7280';
 }
 
 // ----------------------------------------------------------------

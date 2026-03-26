@@ -193,20 +193,103 @@ const AutoDetect = {
       }
     }
 
+    // Proper noun heuristic — catch names, company names, project names
+    const properNouns = this._detectProperNouns(text, configured);
+    findings.push(...properNouns);
+
     // Deduplicate overlapping matches
-    findings.sort((a, b) => a.index - b.index);
+    findings.sort((a, b) => (a.index || 0) - (b.index || 0));
     const deduped = [];
     let lastEnd = -1;
     for (const f of findings) {
-      if (f.index >= lastEnd) {
+      const idx = f.index || 0;
+      if (idx >= lastEnd) {
         deduped.push(f);
-        lastEnd = f.index + f.value.length;
+        lastEnd = idx + f.value.length;
       }
     }
 
     return deduped;
   },
+
+  /**
+   * Detect capitalized words mid-sentence that might be proper nouns
+   * (names, company names, project names) not in the configured set.
+   */
+  _detectProperNouns(text, configured) {
+    const findings = [];
+    const re = /(?:^|[.!?\n]\s*)?([A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})*)/g;
+    let m;
+
+    while ((m = re.exec(text)) !== null) {
+      const fullMatch = m[1];
+      if (!fullMatch) continue;
+
+      const before = text.slice(Math.max(0, m.index - 2), m.index);
+      const isSentenceStart = m.index === 0 || /[.!?\n]\s*$/.test(before);
+
+      const words = fullMatch.split(/\s+/);
+      const properWords = words.filter(w =>
+        w.length >= 3 &&
+        !COMMON_WORDS.has(w.toLowerCase()) &&
+        !configured.has(w.toLowerCase())
+      );
+
+      if (properWords.length === 0) continue;
+      if (isSentenceStart && properWords.length === 1 && words.length === 1) continue;
+
+      const value = properWords.join(' ');
+      if (value.length >= 3 && !configured.has(value.toLowerCase())) {
+        findings.push({
+          name: 'Possible Name/Org',
+          value,
+          hint: 'Capitalized word — could be a name, company, or project',
+          category: 'name',
+        });
+      }
+    }
+
+    const seen = new Set();
+    return findings.filter(f => {
+      if (seen.has(f.value)) return false;
+      seen.add(f.value);
+      return true;
+    });
+  },
 };
+
+// Common English words to exclude from proper noun detection
+const COMMON_WORDS = new Set([
+  'the', 'and', 'but', 'for', 'not', 'you', 'all', 'can', 'had', 'her',
+  'was', 'one', 'our', 'out', 'are', 'has', 'his', 'how', 'its', 'may',
+  'new', 'now', 'old', 'see', 'way', 'who', 'did', 'get', 'let', 'say',
+  'she', 'too', 'use', 'also', 'back', 'been', 'call', 'came', 'come',
+  'could', 'each', 'even', 'find', 'from', 'give', 'good', 'great',
+  'have', 'here', 'high', 'into', 'just', 'keep', 'know', 'last', 'like',
+  'live', 'long', 'look', 'made', 'make', 'many', 'more', 'most', 'much',
+  'must', 'name', 'next', 'only', 'over', 'part', 'people', 'place',
+  'same', 'show', 'side', 'since', 'some', 'still', 'such', 'take',
+  'tell', 'than', 'that', 'them', 'then', 'there', 'these', 'they',
+  'this', 'time', 'turn', 'used', 'very', 'want', 'well', 'were',
+  'what', 'when', 'where', 'which', 'while', 'will', 'with', 'work',
+  'would', 'year', 'your', 'about', 'after', 'again', 'being', 'between',
+  'both', 'before', 'down', 'during', 'first', 'found', 'group',
+  'however', 'important', 'large', 'later', 'little', 'never',
+  'number', 'other', 'point', 'right', 'small', 'state', 'thing',
+  'think', 'those', 'three', 'through', 'under', 'until', 'water',
+  'world', 'write', 'might', 'should', 'because', 'although',
+  // Programming / tech terms
+  'string', 'number', 'boolean', 'object', 'array', 'function', 'class',
+  'type', 'error', 'null', 'undefined', 'true', 'false', 'return',
+  'import', 'export', 'default', 'const', 'async', 'await',
+  'note', 'example', 'warning', 'step', 'option', 'result', 'value',
+  'key', 'data', 'info', 'file', 'code', 'test', 'debug', 'config',
+  'setup', 'update', 'please', 'thanks', 'hello', 'sorry',
+  // Days and months
+  'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+  'january', 'february', 'march', 'april', 'may', 'june', 'july',
+  'august', 'september', 'october', 'november', 'december',
+]);
 
 if (typeof globalThis !== 'undefined') {
   globalThis.AutoDetect = AutoDetect;

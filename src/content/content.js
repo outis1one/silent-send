@@ -413,7 +413,7 @@
       </div>
       ${items}
       ${more}
-      <div class="ss-ad-footer">These were sent as-is. Consider adding them to your identity or mappings.</div>
+      <div class="ss-ad-footer">${settings.autoRedactDetected !== false ? 'Auto-redacted before sending.' : 'These were sent as-is.'} Consider adding them to your identity or mappings.</div>
     `;
 
     warningEl.classList.add('visible');
@@ -509,9 +509,25 @@
   }
 
   // ============================================================
+  // Track outbound substitutions — only these get revealed
+  //
+  // Maps substitute value (lowercase) → real value so reveal
+  // only replaces values that were actually sent to the AI,
+  // preventing false positives like "user" in AI prose.
+  // ============================================================
+  const sessionSubstitutions = new Map();
+
+  // ============================================================
   // Notify content script of substitutions (for badge + logging)
   // ============================================================
   function notifySubstitutions(replacements) {
+    // Record what was actually substituted so reveal knows
+    for (const r of replacements) {
+      if (r.replaced && r.original) {
+        sessionSubstitutions.set(r.replaced.toLowerCase(), r.original);
+      }
+    }
+
     window.postMessage({
       type: 'ss:substitution-performed',
       count: replacements.length,
@@ -736,29 +752,46 @@
   }
 
   // Build pairs: substitute → real
+  // Only includes substitutes that were actually sent outbound in this
+  // session, preventing false positives (e.g. "user" in AI prose).
   function buildRevealPairs() {
     const pairs = [];
 
+    // Helper: only add if this substitute was actually sent
+    function addIfUsed(from, to, caseSensitive) {
+      if (!from || !to) return;
+      if (sessionSubstitutions.has(from.toLowerCase())) {
+        pairs.push({ from, to, caseSensitive });
+      }
+    }
+
     for (const m of mappings) {
       if (!m.enabled || !m.substitute || !m.real) continue;
-      pairs.push({ from: m.substitute, to: m.real, caseSensitive: m.caseSensitive });
+      addIfUsed(m.substitute, m.real, m.caseSensitive);
     }
 
     if (identity) {
       for (const e of (identity.emails || [])) {
-        if (e.substitute && e.real) pairs.push({ from: e.substitute, to: e.real });
+        addIfUsed(e.substitute, e.real);
       }
       for (const n of (identity.names || [])) {
-        if (n.substitute && n.real) pairs.push({ from: n.substitute, to: n.real });
+        addIfUsed(n.substitute, n.real);
       }
       for (const u of (identity.usernames || [])) {
-        if (u.substitute && u.real) pairs.push({ from: u.substitute, to: u.real });
+        addIfUsed(u.substitute, u.real);
       }
       for (const h of (identity.hostnames || [])) {
-        if (h.substitute && h.real) pairs.push({ from: h.substitute, to: h.real });
+        addIfUsed(h.substitute, h.real);
       }
       for (const p of (identity.phones || [])) {
-        if (p.substitute && p.real) pairs.push({ from: p.substitute, to: p.real });
+        addIfUsed(p.substitute, p.real);
+      }
+    }
+
+    // Also add auto-detect and secret scanner substitutions from this session
+    for (const [replaced, original] of sessionSubstitutions) {
+      if (!pairs.some(p => p.from.toLowerCase() === replaced)) {
+        pairs.push({ from: replaced, to: original });
       }
     }
 
@@ -766,10 +799,12 @@
     return pairs;
   }
 
-  // Cache
+  // Cache — invalidate when config changes or new substitutions happen
   let _revealPairsCache = null;
+  let _revealPairsCacheSize = 0;
   window.addEventListener('message', (event) => {
     if (event.data?.type === 'ss:config-updated') _revealPairsCache = null;
+    if (event.data?.type === 'ss:substitution-performed') _revealPairsCache = null;
   });
 
   function getRevealPairs() {

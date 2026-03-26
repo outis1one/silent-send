@@ -23,6 +23,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderActivity();
   loadIdentityForm();
   updateStatusDot();
+  checkFirstRun();
 
   $('#enableToggle').checked = settings.enabled;
 
@@ -196,6 +197,7 @@ async function saveIdentity() {
   };
 
   await Storage.saveIdentity(identity);
+  checkFirstRun();
 
   // Flash save button
   const btn = $('#btnSaveIdentity');
@@ -205,6 +207,28 @@ async function saveIdentity() {
     btn.textContent = 'Save Identity';
     btn.style.background = '';
   }, 1500);
+}
+
+// --- First-Run Check ---
+function checkFirstRun() {
+  const hasNames = (identity.names || []).length > 0;
+  const hasEmails = (identity.emails || []).length > 0 || !!identity.catchAllEmail;
+  const hasUsernames = (identity.usernames || []).length > 0;
+  const hasMappings = mappings.length > 0;
+
+  // Show banner if nothing is configured at all
+  const isConfigured = hasNames || hasEmails || hasUsernames || hasMappings;
+  const banner = $('#firstRunBanner');
+  banner.style.display = isConfigured ? 'none' : 'flex';
+
+  // Also update the status dot — orange if unconfigured
+  const dot = $('#statusDot');
+  if (!isConfigured && settings.enabled) {
+    dot.classList.add('off-site');
+    dot.classList.remove('disabled');
+  } else {
+    dot.classList.remove('off-site');
+  }
 }
 
 // --- Add Mapping ---

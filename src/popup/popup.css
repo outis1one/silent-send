@@ -242,6 +242,40 @@ body {
   white-space: nowrap;
 }
 
+/* First-run banner */
+.first-run-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 16px;
+  background: #fef2f2;
+  border-bottom: 1px solid #fecaca;
+}
+
+.first-run-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #dc2626;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.first-run-text {
+  font-size: 12px;
+  color: #991b1b;
+  line-height: 1.4;
+}
+
+.first-run-text strong {
+  font-weight: 600;
+}
+
 /* Identity tab */
 .id-section {
   margin-bottom: 12px;

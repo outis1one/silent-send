@@ -21,12 +21,26 @@ const tabCounts = new Map();
 
 // Built-in URL patterns
 const BUILTIN_URL_PATTERNS = [
+  // AI services
   'https://claude.ai/*',
   'https://chatgpt.com/*',
   'https://chat.openai.com/*',
   'https://grok.x.ai/*',
   'https://x.com/i/grok*',
   'https://gemini.google.com/*',
+  'https://www.perplexity.ai/*',
+  'https://copilot.microsoft.com/*',
+  'https://chat.deepseek.com/*',
+  'https://huggingface.co/chat/*',
+  'https://poe.com/*',
+  // Developer & support sites
+  'https://github.com/*',
+  'https://gitlab.com/*',
+  'https://www.reddit.com/*',
+  'https://old.reddit.com/*',
+  'https://stackoverflow.com/*',
+  'https://pastebin.com/*',
+  // Local
   'http://localhost/*',
   'http://127.0.0.1/*',
 ];

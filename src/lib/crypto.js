@@ -374,6 +374,9 @@ const SilentSendCrypto = {
    * Check if WebAuthn is available in this browser.
    */
   isWebAuthnAvailable() {
+    // WebAuthn doesn't work on extension pages (chrome-extension:// origin)
+    if (typeof location !== 'undefined' && location.protocol === 'chrome-extension:') return false;
+    if (typeof location !== 'undefined' && location.protocol === 'moz-extension:') return false;
     return !!(window.PublicKeyCredential && navigator.credentials);
   },
 

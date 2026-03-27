@@ -791,25 +791,41 @@ const SilentSendSync = {
   // ----------------------------------------------------------------
 
   async _getAllData() {
-    const result = await api.storage.local.get(null);
+    // Use dynamic import to avoid circular dependency
+    const StorageModule = (await import('./storage.js')).default;
+    const identity = await StorageModule._readSecure('ss_identity');
+    const mappings = await StorageModule._readSecure('ss_mappings');
+    const settings = await StorageModule._readSecure('ss_settings');
+    const result = await api.storage.local.get('ss_lastModified');
     return {
       version: '1',
       lastModified: result.ss_lastModified || Date.now(),
-      identity: result.ss_identity || {},
-      mappings: result.ss_mappings || [],
-      settings: result.ss_settings || {},
+      identity: identity || {},
+      mappings: mappings || [],
+      settings: settings || {},
     };
   },
 
   async _applyData(data, source = 'unknown') {
-    const toSet = {
+    const StorageModule = (await import('./storage.js')).default;
+
+    // Write through Storage module so data gets encrypted if at-rest
+    // encryption is enabled
+    if (data.identity !== undefined) {
+      await StorageModule._writeSecure('ss_identity', data.identity);
+    }
+    if (data.mappings !== undefined) {
+      await StorageModule._writeSecure('ss_mappings', data.mappings);
+    }
+    if (data.settings !== undefined) {
+      await StorageModule._writeSecure('ss_settings', data.settings);
+    }
+
+    // Metadata stays plaintext
+    await api.storage.local.set({
       ss_lastModified: data.lastModified,
       ss_sync_notification: { source, time: Date.now() },
-    };
-    if (data.identity !== undefined) toSet.ss_identity = data.identity;
-    if (data.mappings !== undefined) toSet.ss_mappings = data.mappings;
-    if (data.settings !== undefined) toSet.ss_settings = data.settings;
-    await api.storage.local.set(toSet);
+    });
   },
 
   async _getSyncChunkKeys() {

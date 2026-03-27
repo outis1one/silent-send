@@ -721,6 +721,13 @@ let syncDirHandle = null;
 const SYNC_FILE_NAME = 'silent-send-sync.json';
 
 async function initFileSync() {
+  // Hide the entire section if File System Access API isn't supported
+  if (!window.showDirectoryPicker) {
+    const section = $('#fileSyncSection');
+    if (section) section.style.display = 'none';
+    return;
+  }
+
   syncDirHandle = await SilentSendSync.loadSyncDirHandle();
   updateFileSyncUI();
   if (syncDirHandle) {

@@ -578,7 +578,7 @@
     if (!text || text.length < 5) return [];
     const hasContext = CONTEXT_WORDS_RE.test(text);
 
-    // Build skip set from configured values
+    // Build skip set from configured values (identity + explicit mappings)
     const configured = new Set();
     if (ident) {
       const addAll = (arr, key) => (arr || []).forEach(item => {
@@ -587,6 +587,11 @@
       });
       addAll(ident.names); addAll(ident.emails);
       addAll(ident.usernames); addAll(ident.hostnames); addAll(ident.phones);
+    }
+    // Also skip values that are already in explicit mappings
+    for (const m of mappings) {
+      if (m.real) configured.add(m.real.toLowerCase());
+      if (m.substitute) configured.add(m.substitute.toLowerCase());
     }
 
     const findings = [];
@@ -1548,8 +1553,8 @@
   function revealInElement(el) {
     if (SKIP_REVEAL_TAGS.has(el.tagName)) return;
     if (el.classList?.contains('ss-reveal-badge')) return;
-    // Never touch contenteditable elements (chat input boxes)
     if (el.isContentEditable) return;
+    if (isInNonChatArea(el)) return;
 
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
@@ -1557,6 +1562,7 @@
         if (parent && SKIP_REVEAL_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
         if (parent?.closest?.('.ss-autodetect-warning, .ss-presend-warning, .ss-reveal-badge')) return NodeFilter.FILTER_REJECT;
         if (parent?.closest?.('[contenteditable="true"]')) return NodeFilter.FILTER_REJECT;
+        if (isInNonChatArea(parent)) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }
     });
@@ -1576,11 +1582,13 @@
   function unrevealInElement(el) {
     if (SKIP_REVEAL_TAGS.has(el.tagName)) return;
     if (el.isContentEditable) return;
+    if (isInNonChatArea(el)) return;
 
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
         const parent = node.parentElement;
         if (parent?.closest?.('[contenteditable="true"]')) return NodeFilter.FILTER_REJECT;
+        if (isInNonChatArea(parent)) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }
     });
@@ -1615,6 +1623,7 @@
         if (parent && SKIP_REVEAL_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
         if (parent?.closest?.('.ss-autodetect-warning, .ss-presend-warning, .ss-reveal-badge')) return NodeFilter.FILTER_REJECT;
         if (parent?.closest?.('[contenteditable="true"]')) return NodeFilter.FILTER_REJECT;
+        if (isInNonChatArea(parent)) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }
     });
@@ -1653,10 +1662,17 @@
     }
   }
 
-  // Elements to skip when revealing (inputs, scripts, styles, extension UI)
+  // Elements to skip when revealing (inputs, scripts, styles, extension UI, navigation)
   const SKIP_REVEAL_TAGS = new Set([
     'SCRIPT', 'STYLE', 'NOSCRIPT', 'IFRAME', 'INPUT', 'TEXTAREA', 'SELECT',
+    'NAV', 'ASIDE', 'HEADER', 'FOOTER',
   ]);
+
+  // Skip reveal in navigation, sidebars, headers, and other non-chat UI
+  function isInNonChatArea(el) {
+    if (!el) return false;
+    return !!el.closest('nav, aside, header, footer, [role="navigation"], [role="banner"], [role="complementary"], [data-sidebar], [class*="sidebar"], [class*="Sidebar"], [class*="nav-"], [class*="Nav"], [class*="menu"], [class*="Menu"], [class*="header"], [class*="Header"]');
+  }
 
   // Reveal ALL text on the page + apply highlights
   function revealAllResponses() {
@@ -1695,10 +1711,11 @@
           // Only do text replacement in reveal mode
           if (settings.revealMode) {
             if (node.nodeType === Node.ELEMENT_NODE) {
-              // Skip contenteditable (chat input) and skipped tags
+              // Skip non-chat areas, contenteditable, and skipped tags
               if (!SKIP_REVEAL_TAGS.has(node.tagName) &&
                   !node.isContentEditable &&
-                  !node.closest?.('[contenteditable="true"]')) {
+                  !node.closest?.('[contenteditable="true"]') &&
+                  !isInNonChatArea(node)) {
                 revealInElement(node);
               }
             } else if (node.nodeType === Node.TEXT_NODE) {
@@ -1848,13 +1865,12 @@
     const items = warnings.slice(0, 8).map((w, i) => {
       const fake = generateFake(w.name, w.value);
       const displayVal = w.value.length > 25 ? w.value.slice(0, 22) + '...' : w.value;
+      const displayFake = fake.length > 20 ? fake.slice(0, 17) + '...' : fake;
       return `<div class="ss-ps-item">
         <span class="ss-ps-type">${w.name}</span>
         <code class="ss-ps-value">${displayVal}</code>
         <span class="ss-ps-hint">${w.hint}</span>
-        ${settings.autoAddDetected !== false
-          ? `<button class="ss-ps-add" data-real="${encodeURIComponent(w.value)}" data-fake="${encodeURIComponent(fake)}" data-cat="${w.category}" title="Add mapping: ${displayVal} → ${fake}">+</button>`
-          : ''}
+        <button class="ss-ps-add" data-real="${encodeURIComponent(w.value)}" data-fake="${encodeURIComponent(fake)}" data-cat="${w.category}" title="Add mapping: ${displayVal} → ${displayFake}">+</button>
         <button class="ss-ps-ignore" data-value="${encodeURIComponent(w.value)}" title="Never flag this value again">ignore</button>
       </div>`;
     }).join('');
@@ -1881,28 +1897,26 @@
       preSendWarningEl.classList.remove('visible');
     });
 
-    // Auto-add buttons
+    // Auto-add buttons (+)
     preSendWarningEl.querySelectorAll('.ss-ps-add').forEach(btn => {
       btn.addEventListener('click', async () => {
         const real = decodeURIComponent(btn.dataset.real);
         const fake = decodeURIComponent(btn.dataset.fake);
         const cat = btn.dataset.cat || 'general';
 
-        // Add to mappings via storage
-        const result = await getStorageData('ss_mappings');
-        const currentMappings = result || [];
-        currentMappings.push({
+        // Add to local mappings array (used by the fetch interceptor)
+        const newMapping = {
           id: crypto.randomUUID(),
           real, substitute: fake,
           category: cat,
           caseSensitive: false,
           enabled: true,
           createdAt: Date.now(),
-        });
-        await setStorageData('ss_mappings', currentMappings);
+        };
+        mappings.push(newMapping);
 
-        // Update local mappings so the fetch interceptor uses them immediately
-        mappings = currentMappings;
+        // Persist via storage bridge (handles encryption transparently)
+        setStorageData('ss_mappings', mappings);
 
         // Replace the PPI value in the current input right now
         if (inputEl) {

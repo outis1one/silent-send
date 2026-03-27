@@ -7,7 +7,7 @@ A browser extension (Chrome, Firefox, and Safari) that intercepts personal infor
 | Service | Domains | Status |
 |---------|---------|--------|
 | Claude | claude.ai, claude.ai/code | Tested |
-| ChatGPT | chatgpt.com, chat.openai.com | Untested |
+| ChatGPT | chatgpt.com, chat.openai.com | Tested |
 | Grok | grok.x.ai, x.com/i/grok | Untested |
 | Gemini | gemini.google.com | Untested |
 | OpenWebUI | localhost, 127.0.0.1, or custom domain | Untested |

@@ -221,13 +221,14 @@
 .ss-ps-add:disabled { border-color: #333; cursor: default; }
 
 .ss-ps-ignore {
-  background: none;
+  background: #4b5563;
   border: none;
-  color: #6b7280;
+  color: #d1d5db;
   font-size: 9px;
   cursor: pointer;
   flex-shrink: 0;
-  padding: 2px 4px;
+  padding: 3px 6px;
+  border-radius: 3px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }

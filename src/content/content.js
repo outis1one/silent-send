@@ -661,7 +661,11 @@
     // Record what was actually substituted so reveal knows
     for (const r of replacements) {
       if (r.replaced && r.original) {
-        sessionSubstitutions.set(r.replaced.toLowerCase(), r.original);
+        // Store with lowercase key for lookup, but preserve original case
+        sessionSubstitutions.set(r.replaced.toLowerCase(), {
+          original: r.original,
+          replaced: r.replaced,  // preserve original case
+        });
       }
     }
 
@@ -1272,7 +1276,8 @@
     // Helper: only add if this substitute was actually sent
     function addIfUsed(from, to, caseSensitive) {
       if (!from || !to) return;
-      if (sessionSubstitutions.has(from.toLowerCase())) {
+      const entry = sessionSubstitutions.get(from.toLowerCase());
+      if (entry) {
         pairs.push({ from, to, caseSensitive });
       }
     }
@@ -1301,9 +1306,9 @@
     }
 
     // Also add auto-detect and secret scanner substitutions from this session
-    for (const [replaced, original] of sessionSubstitutions) {
-      if (!pairs.some(p => p.from.toLowerCase() === replaced)) {
-        pairs.push({ from: replaced, to: original });
+    for (const [key, entry] of sessionSubstitutions) {
+      if (!pairs.some(p => p.from.toLowerCase() === key)) {
+        pairs.push({ from: entry.replaced, to: entry.original });
       }
     }
 

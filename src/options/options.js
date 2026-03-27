@@ -620,9 +620,17 @@ function renderDomains() {
     btn.addEventListener('click', async () => {
       const idx = parseInt(btn.dataset.index, 10);
       const domains = settings.customDomains || [];
-      domains.splice(idx, 1);
+      const removed = domains.splice(idx, 1)[0];
       settings.customDomains = domains;
       await Storage.saveSettings({ customDomains: domains });
+
+      // Revoke browser permission for the removed domain
+      if (removed) {
+        try {
+          await api.permissions.remove({ origins: [removed + '/*'] });
+        } catch (e) { /* non-fatal */ }
+      }
+
       renderDomains();
     });
   });

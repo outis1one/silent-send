@@ -89,7 +89,7 @@ Import your existing data from password managers and browser autofill to pre-pop
 | Plain CSV (2 columns) | Real → substitute pairs |
 | Plain text (1 per line) | Auto-categorized values needing substitutes |
 
-Passwords are imported as exact-match mappings (e.g. `MyS3cret!` → `[REDACTED-PASSWORD-1]`) so they get caught in any context — not just `password=value` patterns.
+Passwords are imported as exact-match mappings (e.g. `MyS3cret!` → `[REDACTED-PASSWORD-1]`) so they get caught in any context — not just `password=value` patterns. Imported passwords are protected: they're shown as dots in the UI and require your vault encryption password to reveal. When at-rest encryption is enabled, imported passwords are AES-256 encrypted in storage like all other sensitive data.
 
 Go to **Options** → **Transfer Data** → **Import CSV / Password Export**.
 

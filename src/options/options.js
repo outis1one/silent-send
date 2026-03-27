@@ -104,15 +104,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     setSyncStatus('', 'neutral');
   });
 
-  $('#btnApplySyncCode').addEventListener('click', async () => {
+  $('#btnApplySyncCode').addEventListener('click', applySyncCode);
+
+  async function applySyncCode() {
     const code = $('#syncImportText').value.trim();
     if (!code) return;
     const force = $('#syncForce').checked;
     const result = await SilentSendSync.importSyncCode(code, { force });
     if (result.needsAuth) {
-      setSyncStatus('Authentication required to decrypt this sync code.', 'warn');
-      showSyncAuthPrompt();
+      setSyncStatus('Authentication required — enter your encryption password, then the import will continue.', 'warn');
+      showSyncAuthPrompt('decrypt');
+      // After auth succeeds, retry the import automatically
+      window.__ssPendingSyncImport = applySyncCode;
     } else if (result.success) {
+      window.__ssPendingSyncImport = null;
       setSyncStatus(`Imported successfully (data from ${result.importTime}).`, 'ok');
       $('#syncImportSection').style.display = 'none';
       $('#syncImportText').value = '';
@@ -120,6 +125,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       settings = await Storage.getSettings();
       $('#browserSync').checked = settings.browserSync === true;
       renderMappings();
+      renderPasswords();
       renderDomains();
       renderLog();
     } else if (result.skipped) {
@@ -130,7 +136,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else {
       setSyncStatus(`Failed: ${result.reason}`, 'error');
     }
-  });
+  }
 
   $('#btnCancelSyncImport').addEventListener('click', () => {
     $('#syncImportSection').style.display = 'none';
@@ -1034,22 +1040,34 @@ async function initSyncEncryptionUI() {
       return;
     }
 
-    // Check if this is re-verification (key exists) or first-device (needs full auth)
-    const cached = await SilentSendCrypto.getCachedKey();
     let result;
-    if (cached) {
-      // Re-verification — password alone is enough
-      result = await SilentSendSync.reverifyWithPassword(password);
+
+    // If there's a pending sync import, use authenticateForSync
+    // (derives a temporary key with the source salt, doesn't touch local config)
+    if (window.__ssPendingSyncImport) {
+      result = await SilentSendSync.authenticateForSync(password);
     } else {
-      // First device — full auth with password + TOTP if configured
-      result = await SilentSendSync.authenticate(password, totpCode || undefined);
+      // Normal auth: check if re-verification or first-device
+      const cached = await SilentSendCrypto.getCachedKey();
+      if (cached) {
+        result = await SilentSendSync.reverifyWithPassword(password);
+      } else {
+        result = await SilentSendSync.authenticate(password, totpCode || undefined);
+      }
     }
 
     if (result.success) {
       $('#syncAuthPrompt').style.display = 'none';
       $('#syncAuthPassword').value = '';
       $('#syncAuthTOTPForPassword').value = '';
-      setSyncEncStatus(cached ? 'Re-verified with password.' : 'Authenticated. Sync data unlocked.', 'ok');
+      setSyncEncStatus('Authenticated.', 'ok');
+
+      // If there's a pending sync import, retry it now
+      if (window.__ssPendingSyncImport) {
+        const retry = window.__ssPendingSyncImport;
+        window.__ssPendingSyncImport = null;
+        await retry();
+      }
     } else {
       setSyncAuthStatus(result.reason, 'error');
     }

@@ -15,6 +15,25 @@
   if (window.__silentSendInjected) return;
   window.__silentSendInjected = true;
 
+  // IMMEDIATELY inject a synchronous fetch hook into the page world
+  // BEFORE any async operations. This must run before any page JS
+  // (like ChatGPT's Next.js) can store a reference to the original fetch.
+  const earlyHook = document.createElement('script');
+  earlyHook.textContent = `(function(){
+    window.__ssOriginalFetch = window.fetch;
+    window.__ssOriginalXHROpen = XMLHttpRequest.prototype.open;
+    window.__ssOriginalXHRSend = XMLHttpRequest.prototype.send;
+    window.__ssReady = false;
+    window.fetch = function() {
+      if (window.__ssReady && window.__ssInterceptFetch) {
+        return window.__ssInterceptFetch.apply(this, arguments);
+      }
+      return window.__ssOriginalFetch.apply(this, arguments);
+    };
+  })();`;
+  (document.head || document.documentElement).appendChild(earlyHook);
+  earlyHook.remove();
+
   // Merge active profiles into flat identity object
   function mergeProfiles(data) {
     const profiles = data?.profiles || [];
@@ -70,32 +89,8 @@
     // Merge active profiles into a flat identity object for the content script
     const identity = mergeProfiles(identityData);
 
-    // STEP 1: Inject a synchronous inline script that patches fetch/XHR
-    // IMMEDIATELY, before any page JS can store a reference to the originals.
-    // This thin proxy queues calls until the full content.js loads.
-    const earlyHook = document.createElement('script');
-    earlyHook.textContent = `(function(){
-      // Store the real fetch/XHR before any page script can
-      window.__ssOriginalFetch = window.fetch;
-      window.__ssOriginalXHROpen = XMLHttpRequest.prototype.open;
-      window.__ssOriginalXHRSend = XMLHttpRequest.prototype.send;
-      window.__ssReady = false;
-      window.__ssQueue = [];
-
-      // Replace fetch with a proxy that queues until content.js is ready
-      window.fetch = function() {
-        if (window.__ssReady && window.__ssInterceptFetch) {
-          return window.__ssInterceptFetch.apply(this, arguments);
-        }
-        // If not ready yet, call original (no substitution possible)
-        return window.__ssOriginalFetch.apply(this, arguments);
-      };
-    })();`;
-    (document.head || document.documentElement).appendChild(earlyHook);
-    earlyHook.remove();
-
-    // STEP 2: Load the full content.js which will use __ssOriginalFetch
-    // and set __ssReady = true when it's done hooking
+    // Load the full content.js which will use __ssOriginalFetch
+    // (captured by the early hook above) and set __ssReady = true
     const script = document.createElement('script');
     script.setAttribute('data-ss-config', JSON.stringify({ mappings, identity, settings }));
     script.src = api.runtime.getURL('src/content/content.js');

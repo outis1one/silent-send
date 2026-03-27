@@ -464,47 +464,100 @@ const SilentSendSync = {
   async _decryptFromSync(data) {
     if (!data?._ssEncrypted) return { data, decrypted: false };
 
-    // Always use the sync envelope's salt/verificationBlob for decryption,
-    // not the local config. Different devices have different salts, so the
-    // local key won't decrypt data encrypted with another device's salt.
-    let config = await this._getSyncEncryption();
+    // Decrypt using the SOURCE device's salt (embedded in the sync envelope).
+    // We derive a TEMPORARY key — never modify the local config or cached key,
+    // because the local data is encrypted with the LOCAL salt.
+    const sourceSalt = data._encConfig?.salt;
+    const sourceVerification = data._encConfig?.verificationBlob;
 
-    if (data._encConfig) {
-      // Use the source's salt for this decryption, but don't overwrite
-      // the local config permanently yet — only if decryption succeeds
-      config = {
-        ...(config || {}),
-        enabled: true,
-        salt: data._encConfig.salt,
-        verificationBlob: data._encConfig.verificationBlob,
-      };
-    }
-
-    if (!config?.enabled) {
-      return { data: null, decrypted: false, needsAuth: true };
-    }
-
-    // Try to get a key using the sync envelope's salt
-    // First check if we have a cached key that matches
-    let keyInfo = await SilentSendCrypto.getCachedKey();
-
-    // If the cached key's salt doesn't match the sync data's salt,
-    // we need to re-derive from the password
-    if (keyInfo && data._encConfig && keyInfo.salt !== data._encConfig.salt) {
-      keyInfo = null; // force re-auth with the correct salt
-    }
-
-    if (!keyInfo) {
-      // Need the user to enter the password — save the sync salt temporarily
-      // so authenticate() uses it to derive the correct key
-      if (data._encConfig) {
-        await this._saveSyncEncryption(config);
+    if (!sourceSalt) {
+      // No embedded config — try local key (same-device sync like browser.storage.sync)
+      const keyInfo = await SilentSendCrypto.getCachedKey();
+      if (!keyInfo) return { data: null, decrypted: false, needsAuth: true };
+      try {
+        const decrypted = await SilentSendCrypto.decryptWithKey(data.payload, keyInfo.key);
+        return this._handleDecryptedMeta(decrypted);
+      } catch {
+        return { data: null, decrypted: false, needsAuth: true };
       }
-      return { data: null, decrypted: false, needsAuth: true };
     }
 
-    const decrypted = await SilentSendCrypto.decryptWithKey(data.payload, keyInfo.key);
+    // Cross-device: need to derive a temporary key from the source salt.
+    // Check if we have a stored password-derived key for this source salt.
+    const tempKeyStore = await this._getTempSyncKey(sourceSalt);
+    if (tempKeyStore) {
+      try {
+        const decrypted = await SilentSendCrypto.decryptWithKey(data.payload, tempKeyStore.key);
+        return this._handleDecryptedMeta(decrypted);
+      } catch { /* wrong key, fall through to prompt */ }
+    }
 
+    // Need the user's password to derive a key with the source salt.
+    // Store the source salt temporarily so the auth prompt can use it.
+    this._pendingSyncSalt = sourceSalt;
+    this._pendingSyncVerification = sourceVerification;
+    return { data: null, decrypted: false, needsAuth: true, syncSalt: sourceSalt };
+  },
+
+  /**
+   * Authenticate specifically for a cross-device sync import.
+   * Derives a temporary key with the source device's salt.
+   * Does NOT modify the local encryption config or cached key.
+   */
+  async authenticateForSync(password) {
+    const salt = this._pendingSyncSalt;
+    const verification = this._pendingSyncVerification;
+    if (!salt) return { success: false, reason: 'No pending sync import.' };
+
+    // Derive key with the source salt
+    const { key } = await SilentSendCrypto.deriveAndReturnKey(password, salt);
+
+    // Verify password against the source's verification blob
+    if (verification) {
+      try {
+        await SilentSendCrypto.decryptWithKey(verification, key);
+      } catch {
+        return { success: false, reason: 'Wrong password.' };
+      }
+    }
+
+    // Store this temporary key for the source salt (NOT in the main cache)
+    await this._storeTempSyncKey(salt, key);
+    this._pendingSyncSalt = null;
+    this._pendingSyncVerification = null;
+
+    return { success: true };
+  },
+
+  async _storeTempSyncKey(salt, key) {
+    try {
+      const db = await SilentSendCrypto._openCacheDB();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction('keys', 'readwrite');
+        tx.objectStore('keys').put({ key, salt, storedAt: Date.now() }, 'tempSyncKey');
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch { /* non-fatal */ }
+  },
+
+  async _getTempSyncKey(salt) {
+    try {
+      const db = await SilentSendCrypto._openCacheDB();
+      return new Promise((resolve) => {
+        const tx = db.transaction('keys', 'readonly');
+        const req = tx.objectStore('keys').get('tempSyncKey');
+        req.onsuccess = () => {
+          const entry = req.result;
+          if (entry?.key && entry.salt === salt) resolve(entry);
+          else resolve(null);
+        };
+        req.onerror = () => resolve(null);
+      });
+    } catch { return null; }
+  },
+
+  async _handleDecryptedMeta(decrypted) {
     // Restore full encryption config from inner metadata
     if (decrypted._encMeta) {
       const fullConfig = await this._getSyncEncryption();

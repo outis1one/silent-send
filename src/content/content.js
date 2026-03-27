@@ -182,6 +182,32 @@
             replacements.push({ original: matched, replaced: sub, category: 'name', pattern: 'smart' });
             return sub;
           });
+          // Concatenated forms: JohnSmith, johnsmith, john.smith, john_smith, john-smith
+          // Also reversed: SmithJohn, smithjohn, smith.john, etc.
+          const f = first.real, l = last.real;
+          const fs = first.substitute, ls = last.substitute;
+          const concatPatterns = [
+            // first+last
+            [f + l, fs + ls],
+            [f + '.' + l, fs + '.' + ls],
+            [f + '_' + l, fs + '_' + ls],
+            [f + '-' + l, fs + '-' + ls],
+            // last+first
+            [l + f, ls + fs],
+            [l + '.' + f, ls + '.' + fs],
+            [l + '_' + f, ls + '_' + fs],
+            [l + '-' + f, ls + '-' + fs],
+          ];
+          for (const [real, sub] of concatPatterns) {
+            result = result.replace(new RegExp('\\b' + esc(real) + '\\b', 'gi'), (matched) => {
+              // Preserve case: all-lower→lower, ALL-UPPER→upper, else use sub as-is
+              let replacement = sub;
+              if (matched === matched.toLowerCase()) replacement = sub.toLowerCase();
+              else if (matched === matched.toUpperCase()) replacement = sub.toUpperCase();
+              replacements.push({ original: matched, replaced: replacement, category: 'name', pattern: 'smart-concat' });
+              return replacement;
+            });
+          }
         }
       }
 

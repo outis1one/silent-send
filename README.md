@@ -398,6 +398,20 @@ src/
 
 ## Sync features
 
+Keep your identities, mappings, and settings in sync across browsers and devices.
+
+### Sync methods
+
+| Method | How it works | Chrome | Firefox | Brave | Safari |
+|---|---|---|---|---|---|
+| **Sync Code** | Generate a code, paste in another browser | Yes | Yes | Yes | Yes |
+| **GitHub Gist** | Store settings in a private Gist (needs a free GitHub PAT) | Yes | Yes | Yes | Yes |
+| **Custom URL** | Any endpoint supporting GET + PUT (WebDAV, cloud function, etc.) | Yes | Yes | Yes | Yes |
+| **Browser account sync** | Automatic via your Chrome/Firefox account | Yes | Yes | No | No |
+| **Auto-Sync Folder** | Pick a cloud-synced folder (Dropbox, OneDrive, etc.) | Yes | No | No | No |
+
+Auto-Sync Folder uses the File System Access API which is only available in Chrome. All other methods work in every browser.
+
 ### Auto sync
 
 When configured, the extension automatically pushes and pulls settings on a configurable interval (5/15/30/60 minutes) using GitHub Gist or a custom URL endpoint. Local changes trigger an immediate push.

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Silent Send",
-  "version": "2.0.5",
+  "version": "2.0.6",
   "description": "Intercepts personal info and substitutes it with user-defined replacements before sending to AI services.",
   "browser_specific_settings": {
     "gecko": {

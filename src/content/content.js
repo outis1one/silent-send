@@ -908,13 +908,59 @@
     return SKIP_URL_PATTERNS.some(p => p.test(url));
   }
 
-  window.fetch = async function (url, options) {
+  window.fetch = async function (input, init) {
     if (!settings.enabled || !hasSubstitutions()) {
-      return originalFetch.call(this, url, options);
+      return originalFetch.call(this, input, init);
+    }
+
+    // Handle both fetch(url, options) and fetch(Request) signatures
+    let url, options;
+    if (input instanceof Request) {
+      url = input.url;
+      // Clone the Request so we can read/modify the body
+      options = {
+        method: input.method,
+        headers: input.headers,
+        body: null, // will read below
+        mode: input.mode,
+        credentials: input.credentials,
+        cache: input.cache,
+        redirect: input.redirect,
+        referrer: input.referrer,
+        signal: input.signal,
+      };
+      // Read the body from the Request object
+      try {
+        const ct = input.headers.get('content-type') || '';
+        if (ct.includes('json') || ct.includes('text')) {
+          options.body = await input.text();
+        } else {
+          // Non-text body — pass through unmodified
+          return originalFetch.call(this, input, init);
+        }
+      } catch {
+        return originalFetch.call(this, input, init);
+      }
+    } else {
+      url = input;
+      options = init ? { ...init } : {};
     }
 
     const urlStr = typeof url === 'string' ? url : url?.url || '';
     const method = (options?.method || 'GET').toUpperCase();
+
+    // Convert non-string bodies to string where possible
+    if (options.body && typeof options.body !== 'string' && !(options.body instanceof FormData)) {
+      try {
+        if (options.body instanceof Blob) {
+          options.body = await options.body.text();
+        } else if (options.body instanceof ArrayBuffer || ArrayBuffer.isView(options.body)) {
+          options.body = new TextDecoder().decode(options.body);
+        } else if (options.body instanceof URLSearchParams) {
+          options.body = options.body.toString();
+        }
+      } catch { /* leave as-is */ }
+    }
 
     // Only intercept POST/PUT/PATCH with a body
     if (

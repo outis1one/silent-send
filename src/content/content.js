@@ -14,7 +14,8 @@
   function safeHTML(el, html) {
     const template = document.createElement('template');
     template.innerHTML = html;
-    el.replaceChildren(...template.content.childNodes);
+    // Convert to static array — childNodes is live and shrinks as nodes move
+    el.replaceChildren(...Array.from(template.content.childNodes));
   }
 
   // ============================================================

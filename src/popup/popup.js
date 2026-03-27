@@ -21,7 +21,7 @@ const $$ = (sel) => document.querySelectorAll(sel);
 // --- Safe innerHTML replacement (AMO-compliant) ---
 function safeHTML(el, html) {
   const doc = new DOMParser().parseFromString(html, 'text/html');
-  el.replaceChildren(...doc.body.childNodes);
+  el.replaceChildren(...Array.from(doc.body.childNodes));
 }
 
 // --- Init ---

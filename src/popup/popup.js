@@ -338,11 +338,17 @@ async function showLockedUI() {
 // --- Profiles ---
 function renderProfileSelector() {
   const select = $('#profileSelect');
-  safeHTML(select, profiles.map(p =>
-    `<option value="${p.id}" ${p.id === currentProfileId ? 'selected' : ''}>` +
-    `${escapeHtml(p.name)}${p.active ? '' : ' (off)'}` +
-    `</option>`
-  ).join(''));
+  // Build options via DOM API — safeHTML + DOMParser mangles <option> elements
+  select.replaceChildren();
+  for (const p of profiles) {
+    const opt = new Option(
+      `${p.name}${p.active ? '' : ' (off)'}`,
+      p.id,
+      false,
+      p.id === currentProfileId
+    );
+    select.appendChild(opt);
+  }
 
   const profile = profiles.find(p => p.id === currentProfileId);
   $('#profileActive').checked = profile?.active ?? true;

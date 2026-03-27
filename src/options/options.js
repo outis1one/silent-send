@@ -1190,9 +1190,7 @@ async function initAutoSyncUI() {
     $('#autoSyncEnabled').checked = config.enabled || false;
     $('#autoSyncMethod').value = config.method || 'gist';
     $('#autoSyncInterval').value = String(config.interval || 15);
-    if (config.lastPull) {
-      setAutoSyncStatus(`Last pull: ${new Date(config.lastPull).toLocaleString()}`, 'ok');
-    }
+    updateAutoSyncStatus(config);
   }
 
   const saveAutoSync = async () => {
@@ -1201,24 +1199,57 @@ async function initAutoSyncUI() {
     config.method = $('#autoSyncMethod').value;
     config.interval = parseInt($('#autoSyncInterval').value, 10) || 15;
 
-    // Inherit token/URL from existing fields
-    if (config.method === 'gist') {
-      const token = $('#gistToken').value.trim();
-      if (token) config.gistToken = token;
-    } else {
-      config.url = $('#customSyncUrl').value.trim();
-      config.headers = parseHeadersField($('#customSyncHeaders').value);
+    // Always grab the latest token/URL from the page fields
+    // AND persist them so they survive page reloads
+    const gistToken = $('#gistToken').value.trim();
+    if (gistToken) config.gistToken = gistToken;
+    const customUrl = $('#customSyncUrl').value.trim();
+    if (customUrl) config.url = customUrl;
+    config.headers = parseHeadersField($('#customSyncHeaders').value);
+
+    // Validate: need credentials for the chosen method
+    if (config.enabled) {
+      if (config.method === 'gist' && !config.gistToken) {
+        setAutoSyncStatus('Enter your GitHub PAT in the Gist section above first.', 'warn');
+        config.enabled = false;
+        $('#autoSyncEnabled').checked = false;
+      } else if (config.method === 'url' && !config.url) {
+        setAutoSyncStatus('Enter a URL in the Custom URL section above first.', 'warn');
+        config.enabled = false;
+        $('#autoSyncEnabled').checked = false;
+      }
     }
 
     await SilentSendSync.saveAutoSyncConfig(config);
-    // Tell service worker to reconfigure alarm
     api.runtime.sendMessage({ type: 'autosync:config-changed' }).catch(() => {});
-    setAutoSyncStatus(config.enabled ? 'Auto sync enabled.' : 'Auto sync disabled.', config.enabled ? 'ok' : 'neutral');
+    updateAutoSyncStatus(config);
   };
+
+  // Also save token when the Gist token field changes
+  $('#gistToken').addEventListener('change', async () => {
+    const config = (await SilentSendSync.getAutoSyncConfig()) || {};
+    const token = $('#gistToken').value.trim();
+    if (token) {
+      config.gistToken = token;
+      await SilentSendSync.saveAutoSyncConfig(config);
+    }
+  });
 
   $('#autoSyncEnabled').addEventListener('change', saveAutoSync);
   $('#autoSyncMethod').addEventListener('change', saveAutoSync);
   $('#autoSyncInterval').addEventListener('change', saveAutoSync);
+}
+
+function updateAutoSyncStatus(config) {
+  if (!config?.enabled) {
+    setAutoSyncStatus('Auto sync disabled.', 'neutral');
+    return;
+  }
+  const parts = [];
+  parts.push(`${config.method === 'gist' ? 'GitHub Gist' : 'Custom URL'} every ${config.interval}min`);
+  if (config.lastPull) parts.push(`last pull: ${new Date(config.lastPull).toLocaleString()}`);
+  if (config.lastPush) parts.push(`last push: ${new Date(config.lastPush).toLocaleString()}`);
+  setAutoSyncStatus(parts.join(' · '), 'ok');
 }
 
 function setAutoSyncStatus(msg, type) {

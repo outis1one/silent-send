@@ -1337,7 +1337,23 @@
     return result;
   }
 
-  const originalTexts = new WeakMap();
+  /**
+   * Reverse of revealText: replace real values back to substitutes.
+   * Used when reveal mode is turned OFF to restore the AI's actual text.
+   */
+  function unrevealText(text) {
+    const pairs = getRevealPairs();
+    let result = text;
+    // Reverse direction: real (p.to) → substitute (p.from)
+    // Sort by length descending to avoid partial matches
+    const reversed = [...pairs].sort((a, b) => b.to.length - a.to.length);
+    for (const p of reversed) {
+      const escaped = esc(p.to);
+      const regex = new RegExp(escaped, p.caseSensitive ? 'g' : 'gi');
+      result = result.replace(regex, p.from);
+    }
+    return result;
+  }
 
   function revealInElement(el) {
     if (SKIP_REVEAL_TAGS.has(el.tagName)) return;
@@ -1350,7 +1366,6 @@
         const parent = node.parentElement;
         if (parent && SKIP_REVEAL_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
         if (parent?.closest?.('.ss-autodetect-warning, .ss-presend-warning, .ss-reveal-badge')) return NodeFilter.FILTER_REJECT;
-        // Skip contenteditable areas (chat input)
         if (parent?.closest?.('[contenteditable="true"]')) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }
@@ -1360,10 +1375,6 @@
     while ((textNode = walker.nextNode())) {
       const text = textNode.textContent;
       if (!text || text.length < MIN_STRING_LENGTH) continue;
-
-      if (!originalTexts.has(textNode)) {
-        originalTexts.set(textNode, text);
-      }
 
       const revealed = revealText(text);
       if (revealed !== text) {
@@ -1385,9 +1396,13 @@
     });
     let textNode;
     while ((textNode = walker.nextNode())) {
-      const original = originalTexts.get(textNode);
-      if (original && textNode.textContent !== original) {
-        textNode.textContent = original;
+      const text = textNode.textContent;
+      if (!text || text.length < MIN_STRING_LENGTH) continue;
+
+      // Actively replace real→substitute (reverse of reveal)
+      const unrevealed = unrevealText(text);
+      if (unrevealed !== text) {
+        textNode.textContent = unrevealed;
       }
     }
   }
@@ -1502,9 +1517,6 @@
               if (parent?.closest?.('[contenteditable="true"]')) continue;
               const text = node.textContent;
               if (text && text.length >= MIN_STRING_LENGTH) {
-                if (!originalTexts.has(node)) {
-                  originalTexts.set(node, text);
-                }
                 const revealed = revealText(text);
                 if (revealed !== text) {
                   node.textContent = revealed;
@@ -1524,9 +1536,6 @@
               // Skip contenteditable (chat input)
               if (parent?.closest?.('[contenteditable="true"]')) continue;
               if (parent && !SKIP_REVEAL_TAGS.has(parent.tagName)) {
-                if (!originalTexts.has(mutation.target)) {
-                  originalTexts.set(mutation.target, text);
-                }
                 const revealed = revealText(text);
                 if (revealed !== text) {
                   mutation.target.textContent = revealed;

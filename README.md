@@ -170,12 +170,35 @@ Remap in Chrome: `chrome://extensions/shortcuts` | Firefox: `about:addons` → g
 
 2. **Badge count** — after sending a message, the extension icon shows a green number (e.g. "3") indicating how many substitutions were made. If you see a number, it's working.
 
-3. **Inspect the actual network request** — this proves your real data never reaches the AI:
-   - Open browser DevTools (F12) → **Network** tab
-   - Send a message containing your real data
-   - Find the POST request to the AI service (e.g. `chat/completions` or `conversation`)
-   - Click it → **Payload** or **Request** tab
-   - Search for your real data — it should not be there. You should only see the replaced data.
+3. **Inspect the actual network request** — this is the definitive proof that your real data never reaches the AI. The steps vary slightly by browser:
+
+   **Firefox:**
+   1. Press F12 to open DevTools → click the **Network** tab
+   2. Send a message in the AI chat that contains your real data
+   3. In the network log, find the row with Method **POST** and File **events** (for Claude) or **conversation** (for ChatGPT)
+   4. Click that row
+   5. Click the **Request** tab in the right panel
+   6. Expand the JSON: look inside `events → 0 → message → content`
+   7. You should see your replaced data (e.g. "Ademo Demo"), **not** your real data (e.g. "John Smith")
+
+   **Chrome / Chromium / Edge:**
+   1. Press F12 to open DevTools → click the **Network** tab
+   2. Send a message in the AI chat that contains your real data
+   3. In the network log, find the row with Method **POST** and Name **chat** or **events** or **conversation**
+   4. Click that row
+   5. Click the **Payload** tab in the right panel
+   6. Expand the request body and look for the message content
+   7. You should see your replaced data, **not** your real data
+
+   **Safari:**
+   1. Safari → Settings → Advanced → check "Show features for web developers"
+   2. Press Cmd+Option+I to open Web Inspector → click the **Network** tab
+   3. Send a message in the AI chat that contains your real data
+   4. Find the POST request in the network log
+   5. Click it → click **Request** in the detail panel
+   6. You should see your replaced data, **not** your real data
+
+   If your real data appears anywhere in the request body, the substitution isn't working — check that the extension is enabled and your identity is configured.
 
 4. **Activity tab** — click the extension icon → Activity tab. Shows a timestamped log of every substitution with the original and replaced values.
 

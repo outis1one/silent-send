@@ -10,6 +10,13 @@
 (function () {
   'use strict';
 
+  // --- Safe innerHTML replacement (AMO-compliant, page world) ---
+  function safeHTML(el, html) {
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    el.replaceChildren(...template.content.childNodes);
+  }
+
   // ============================================================
   // Load config from the injector script's data attribute
   // ============================================================
@@ -514,7 +521,7 @@
 
     const more = warnings.length > 5 ? `<div class="ss-ad-more">+${warnings.length - 5} more</div>` : '';
 
-    warningEl.innerHTML = `
+    safeHTML(warningEl, `
       <div class="ss-ad-header">
         <strong>Silent Send detected potential PPI that may not be substituted:</strong>
         <button class="ss-ad-close">&times;</button>
@@ -522,7 +529,7 @@
       ${items}
       ${more}
       <div class="ss-ad-footer">${settings.autoRedactDetected !== false ? 'Auto-redacted before sending.' : 'These were sent as-is.'} Consider adding them to your identity or mappings.</div>
-    `;
+    `);
 
     warningEl.classList.add('visible');
 
@@ -1165,7 +1172,7 @@
         </div>`
       ).join('');
 
-      docPreviewEl.innerHTML = `
+      safeHTML(docPreviewEl, `
         <div class="ss-dp-header">
           <strong>PPI found in ${esc(filename)}</strong>
           <span class="ss-dp-count">${preview.replacementCount} item(s)</span>
@@ -1176,7 +1183,7 @@
           <button class="ss-dp-btn ss-dp-confirm">Substitute & Upload</button>
           <button class="ss-dp-btn ss-dp-cancel">Upload Original</button>
         </div>
-      `;
+      `);
       docPreviewEl.classList.add('visible');
       const confirm = docPreviewEl.querySelector('.ss-dp-confirm');
       const cancel = docPreviewEl.querySelector('.ss-dp-cancel');
@@ -1657,7 +1664,7 @@
 
     const more = warnings.length > 8 ? `<div class="ss-ad-more">+${warnings.length - 8} more</div>` : '';
 
-    preSendWarningEl.innerHTML = `
+    safeHTML(preSendWarningEl, `
       <div class="ss-ad-header">
         <strong>Potential PPI detected — not yet configured:</strong>
         <button class="ss-ad-close">&times;</button>
@@ -1668,7 +1675,7 @@
         ${settings.autoRedactDetected !== false ? 'Auto-redacted with standard placeholders.' : 'These were sent as-is.'}
         ${settings.autoAddDetected !== false ? ' Click + to add a permanent mapping.' : ''}
       </div>
-    `;
+    `);
 
     preSendWarningEl.classList.add('visible');
 

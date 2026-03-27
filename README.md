@@ -20,7 +20,7 @@ A browser extension (Chrome, Firefox, and Safari) that intercepts personal infor
 
 1. **You fill in your Identity** — name, email, username, computer name, phone
 2. **Smart patterns auto-catch variations** — `jsmith@macbook-pro`, `John's`, `/home/jsmith`, `555.123.4567`
-3. **Secret scanner auto-redacts credentials** — API keys, tokens, passwords, SSNs, credit cards (zero config)
+3. **Auto-redacts credentials** — API keys, tokens, passwords, SSNs, credit cards (zero config)
 4. **You type normally** — you see your real text while composing
 5. **On send, it swaps** — the extension intercepts the API request and replaces real values with substitutes
 6. **Badge shows count** — the extension icon shows how many substitutions were made
@@ -47,7 +47,7 @@ A browser extension (Chrome, Firefox, and Safari) that intercepts personal infor
 | `john_smith` | `alex_demo` |
 | `smith-john` | `demo-alex` |
 
-### Secret scanner (automatic, no configuration needed)
+### Auto-redact (automatic, no configuration needed)
 
 | You type | What gets sent |
 |----------|---------------|
@@ -382,7 +382,7 @@ src/
   lib/
     substitution-engine.js — Core explicit find/replace logic
     smart-patterns.js   — Auto-detection of emails, names, usernames, hostnames, phones, paths
-    secret-scanner.js   — Auto-detection of API keys, tokens, passwords, SSNs, credit cards
+    secret-scanner.js   — Auto-redact API keys, tokens, passwords, SSNs, credit cards
     crypto.js           — AES-256-GCM encryption, PBKDF2 key derivation, TOTP (RFC 6238), WebAuthn, key caching
     sync.js             — Cross-browser sync with encryption (browser sync, Gist, folder, URL, sync codes)
     storage.js          — Browser storage wrapper with transparent at-rest encryption
@@ -546,7 +546,7 @@ Silent Send works well for text you type and most document uploads, but some thi
 - **Names inside other words** — if your name is "Art", it won't catch "article" (word boundaries prevent most false positives, but edge cases exist).
 - **Data you haven't configured** — it can only substitute what you told it about, plus known secret formats. Your home address or employer name won't be caught unless you add them.
 - **Short names** — names under 3 characters are skipped for usernames/hostnames to avoid false positives.
-- **Custom secret formats** — the secret scanner knows common API key prefixes (sk-, ghp_, AKIA, etc.) but won't catch proprietary token formats your company uses.
+- **Custom secret formats** — the auto-redactor knows common API key prefixes (sk-, ghp_, AKIA, etc.) but won't catch proprietary token formats your company uses.
 
 **Think of it like a spell checker for privacy** — it catches most things, but you should still glance at sensitive messages before sending.
 

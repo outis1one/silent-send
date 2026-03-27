@@ -784,11 +784,25 @@
     // Record what was actually substituted so reveal knows
     for (const r of replacements) {
       if (r.replaced && r.original) {
-        // Store with lowercase key for lookup, but preserve original case
+        // Store full replacement with lowercase key for lookup
         sessionSubstitutions.set(r.replaced.toLowerCase(), {
           original: r.original,
-          replaced: r.replaced,  // preserve original case
+          replaced: r.replaced,
         });
+        // Also store individual words so reveal pairs match identity entries
+        // e.g. "Ademo Demo" → store "ademo" and "demo" separately
+        const replacedWords = r.replaced.split(/\s+/);
+        const originalWords = r.original.split(/\s+/);
+        if (replacedWords.length > 1) {
+          for (let i = 0; i < replacedWords.length; i++) {
+            if (replacedWords[i] && originalWords[i]) {
+              sessionSubstitutions.set(replacedWords[i].toLowerCase(), {
+                original: originalWords[i],
+                replaced: replacedWords[i],
+              });
+            }
+          }
+        }
       }
     }
 

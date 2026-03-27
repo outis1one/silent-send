@@ -476,7 +476,7 @@ const SilentSendSync = {
       if (!keyInfo) return { data: null, decrypted: false, needsAuth: true };
       try {
         const decrypted = await SilentSendCrypto.decryptWithKey(data.payload, keyInfo.key);
-        return this._handleDecryptedMeta(decrypted);
+        return await this._handleDecryptedMeta(decrypted);
       } catch {
         return { data: null, decrypted: false, needsAuth: true };
       }
@@ -488,7 +488,7 @@ const SilentSendSync = {
     if (tempKeyStore) {
       try {
         const decrypted = await SilentSendCrypto.decryptWithKey(data.payload, tempKeyStore.key);
-        return this._handleDecryptedMeta(decrypted);
+        return await this._handleDecryptedMeta(decrypted);
       } catch { /* wrong key, fall through to prompt */ }
     }
 

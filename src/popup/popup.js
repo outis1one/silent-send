@@ -208,13 +208,7 @@ async function initUnlockedUI() {
     });
   });
 
-  // Options link (footer)
-  $('#btnOptions').addEventListener('click', (e) => {
-    e.preventDefault();
-    api.runtime.openOptionsPage();
-  });
-
-  // Options tab
+  // Open full options page button (Options tab)
   $('#btnOpenFullOptions').addEventListener('click', () => {
     api.runtime.openOptionsPage();
   });

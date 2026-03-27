@@ -15,24 +15,23 @@
   if (window.__silentSendInjected) return;
   window.__silentSendInjected = true;
 
-  // IMMEDIATELY inject a synchronous fetch hook into the page world
-  // BEFORE any async operations. This must run before any page JS
-  // (like ChatGPT's Next.js) can store a reference to the original fetch.
+  // Cross-browser API
+  const api =
+    typeof browser !== 'undefined' && browser.runtime
+      ? browser
+      : typeof chrome !== 'undefined'
+        ? chrome
+        : null;
+
+  // IMMEDIATELY inject the early fetch hook into the page world as an
+  // EXTERNAL file. Must be external (not inline) because sites like
+  // claude.ai have strict CSP that blocks inline scripts. Firefox
+  // enforces this strictly; Chrome is more permissive but external
+  // works everywhere.
   const earlyHook = document.createElement('script');
-  earlyHook.textContent = `(function(){
-    window.__ssOriginalFetch = window.fetch;
-    window.__ssOriginalXHROpen = XMLHttpRequest.prototype.open;
-    window.__ssOriginalXHRSend = XMLHttpRequest.prototype.send;
-    window.__ssReady = false;
-    window.fetch = function() {
-      if (window.__ssReady && window.__ssInterceptFetch) {
-        return window.__ssInterceptFetch.apply(this, arguments);
-      }
-      return window.__ssOriginalFetch.apply(this, arguments);
-    };
-  })();`;
+  earlyHook.src = api.runtime.getURL('src/content/early-hook.js');
   (document.head || document.documentElement).appendChild(earlyHook);
-  earlyHook.remove();
+  earlyHook.onload = () => earlyHook.remove();
 
   // Merge active profiles into flat identity object
   function mergeProfiles(data) {
@@ -65,14 +64,6 @@
 
     return merged;
   }
-
-  // Cross-browser API
-  const api =
-    typeof browser !== 'undefined' && browser.runtime
-      ? browser
-      : typeof chrome !== 'undefined'
-        ? chrome
-        : null;
 
   // Load mappings and settings, then inject into page
   async function init() {

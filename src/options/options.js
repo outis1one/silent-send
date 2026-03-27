@@ -93,15 +93,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     setSyncStatus('', 'neutral');
   });
 
-  $('#btnApplySyncCode').addEventListener('click', async () => {
+  $('#btnApplySyncCode').addEventListener('click', applySyncCode);
+
+  async function applySyncCode() {
     const code = $('#syncImportText').value.trim();
     if (!code) return;
     const force = $('#syncForce').checked;
     const result = await SilentSendSync.importSyncCode(code, { force });
     if (result.needsAuth) {
-      setSyncStatus('Authentication required to decrypt this sync code.', 'warn');
-      showSyncAuthPrompt();
+      setSyncStatus('Authentication required — enter your encryption password, then the import will continue.', 'warn');
+      showSyncAuthPrompt('decrypt');
+      // After auth succeeds, retry the import automatically
+      window.__ssPendingSyncImport = applySyncCode;
     } else if (result.success) {
+      window.__ssPendingSyncImport = null;
       setSyncStatus(`Imported successfully (data from ${result.importTime}).`, 'ok');
       $('#syncImportSection').style.display = 'none';
       $('#syncImportText').value = '';
@@ -109,6 +114,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       settings = await Storage.getSettings();
       $('#browserSync').checked = settings.browserSync === true;
       renderMappings();
+      renderPasswords();
       renderDomains();
       renderLog();
     } else if (result.skipped) {
@@ -119,7 +125,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else {
       setSyncStatus(`Failed: ${result.reason}`, 'error');
     }
-  });
+  }
 
   $('#btnCancelSyncImport').addEventListener('click', () => {
     $('#syncImportSection').style.display = 'none';
@@ -1026,6 +1032,13 @@ async function initSyncEncryptionUI() {
       $('#syncAuthPassword').value = '';
       $('#syncAuthTOTPForPassword').value = '';
       setSyncEncStatus(cached ? 'Re-verified with password.' : 'Authenticated. Sync data unlocked.', 'ok');
+
+      // If there's a pending sync import, retry it now that auth succeeded
+      if (window.__ssPendingSyncImport) {
+        const retry = window.__ssPendingSyncImport;
+        window.__ssPendingSyncImport = null;
+        await retry();
+      }
     } else {
       setSyncAuthStatus(result.reason, 'error');
     }

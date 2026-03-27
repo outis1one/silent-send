@@ -1,6 +1,6 @@
 # Silent Send
 
-A browser extension (Chrome + Firefox) that intercepts personal information and substitutes it with user-defined replacements before sending to AI services.
+A browser extension (Chrome, Firefox, and Safari) that intercepts personal information and substitutes it with user-defined replacements before sending to AI services.
 
 ### Supported services
 
@@ -13,6 +13,8 @@ A browser extension (Chrome + Firefox) that intercepts personal information and 
 | OpenWebUI | localhost, 127.0.0.1, or custom domain | Untested |
 
 > **Note:** Only Claude has been tested so far. The other services have API interception patterns defined but may need adjustments. PRs welcome.
+>
+> **Browsers:** Chrome, Firefox (signed .xpi), and Safari (via Xcode project). All three use the same core code.
 
 ## How it works
 
@@ -39,6 +41,11 @@ A browser extension (Chrome + Firefox) that intercepts personal information and 
 | `(555) 123-4567` | `(555) 000-0000` |
 | `555.123.4567` | `(555) 000-0000` |
 | `macbook-pro` | `mycomputer` |
+| `JohnSmith` | `AlexDemo` |
+| `johnsmith` | `alexdemo` |
+| `john.smith` | `alex.demo` |
+| `john_smith` | `alex_demo` |
+| `smith-john` | `demo-alex` |
 
 ### Secret scanner (automatic, no configuration needed)
 
@@ -89,6 +96,23 @@ Import your existing data from password managers and browser autofill to pre-pop
 Passwords are imported as exact-match mappings (e.g. `MyS3cret!` → `[REDACTED-PASSWORD-1]`) so they get caught in any context — not just `password=value` patterns.
 
 Go to **Options** → **Transfer Data** → **Import CSV / Password Export**.
+
+### Document scanning
+
+When you upload files to an AI service, Silent Send extracts and scans the text for PPI before the file is sent:
+
+| Format | How it works |
+|---|---|
+| PDF | Text extracted from content streams, PPI substituted, uploaded as clean plaintext |
+| DOCX, XLSX, PPTX | XML text extracted from ZIP structure, PPI substituted, uploaded as plaintext |
+| ODT, ODS, ODP | OpenDocument XML text extracted, PPI substituted |
+| DOC, XLS | Legacy binary format — readable text runs extracted |
+| RTF | Formatting stripped, text extracted |
+| TXT, CSV, JSON, code files | Direct string substitution |
+| Images (PNG, JPG, etc.) | Not scanned — no text to extract |
+| Scanned PDFs (image-only) | Not scanned — no text layer |
+
+For PDF/DOCX/XLSX uploads, a preview panel shows what PPI was found before uploading. You can choose to substitute and upload, or upload the original. Text files are substituted silently. The original file on your disk is never modified — substitution only happens to the in-flight upload.
 
 ## First-time setup
 
@@ -145,6 +169,7 @@ Remap in Chrome: `chrome://extensions/shortcuts` | Firefox: `about:addons` → g
 - **Badge count** on the extension icon shows substitutions per page
 - **Activity tab** in the popup shows a timestamped log of every substitution
 - **Test tab** in the popup lets you type text and see the before/after diff live
+- **Options tab** in the popup gives quick access to key settings (secret scanning, auto-detect, highlights, document scan preview)
 - **Reveal mode** (eye icon or `Alt+Shift+R`) shows your real data in AI responses for easy copy/paste
 - **Browser DevTools** → Console shows `[Silent Send] Substituted N value(s)` messages
 
@@ -266,6 +291,49 @@ npm install && npm run run:firefox
 
 This opens Firefox with the extension pre-loaded. Resets when Firefox closes — useful for testing.
 
+### Safari (macOS)
+
+Safari extensions require an Xcode project wrapper. Apple provides a converter that does this automatically.
+
+#### Prerequisites
+
+- macOS with [Xcode](https://apps.apple.com/app/xcode/id497799835) installed (free from Mac App Store)
+- Xcode Command Line Tools: `xcode-select --install`
+- For App Store distribution: [Apple Developer account](https://developer.apple.com/) ($99/year)
+
+#### Build the Safari extension
+
+```bash
+git clone https://github.com/outis1one/silent-send.git
+cd silent-send
+npm install
+./build-safari.sh
+```
+
+This generates an Xcode project at `safari-build/`. Open it in Xcode:
+
+```bash
+open safari-build/Silent\ Send.xcodeproj
+```
+
+#### Test without an Apple Developer account
+
+1. Open the Xcode project
+2. Select **Product → Run** (Cmd+R) — this builds and launches Safari with the extension
+3. In Safari: **Settings → Extensions** → enable "Silent Send"
+4. If Safari says the extension is unsigned:
+   - Safari menu → **Settings → Advanced** → check "Show features for web developers"
+   - Safari menu → **Develop → Allow Unsigned Extensions** (you'll need to re-enable this every time Safari restarts)
+
+#### Distribute via the App Store
+
+1. In Xcode, select your Apple Developer Team in **Signing & Capabilities**
+2. **Product → Archive**
+3. **Distribute App → App Store Connect**
+4. Fill in the App Store listing at [App Store Connect](https://appstoreconnect.apple.com/)
+
+You'll need: screenshots (1280x800), privacy policy URL, description, and keywords.
+
 ## Custom domains (OpenWebUI, etc.)
 
 If you run OpenWebUI or another AI service on a custom domain (not localhost), go to **Options** → **Custom Domains** and add your domain (e.g. `https://ai.myserver.com`). The extension will activate on those domains too.
@@ -278,15 +346,17 @@ For Chrome, you'll need to also grant the extension permission to access the new
 manifest.json           — Chrome extension manifest (Manifest V3)
 manifest.firefox.json   — Firefox variant (adds gecko ID for signing)
 build.sh                — Copies the right manifest to dist/{chrome,firefox}/
+build-safari.sh         — Converts to Safari extension via Xcode project
+sign-firefox.sh         — Signs Firefox extension via Mozilla API
 src/
   background/
-    service-worker.js   — Badge management, logging coordination
+    service-worker.js   — Badge management, auto-sync alarms, org policy polling
   content/
     injector.js         — Content script (isolated world) — loads config, bridges messaging
-    content.js          — Page script (main world) — hooks fetch(), does substitution
-    content.css         — Visual indicators (highlights, reveals)
+    content.js          — Page script (main world) — hooks fetch(), does substitution, document scanning
+    content.css         — Visual indicators (highlights, reveals, document scan preview)
   popup/
-    popup.html/css/js   — Quick access: identity, mappings, activity, test mode
+    popup.html/css/js   — Quick access: identity, mappings, activity, test, options
   options/
     options.html/css/js — Full mapping management, import/export, settings, custom domains
   lib/
@@ -297,6 +367,7 @@ src/
     sync.js             — Cross-browser sync with encryption (browser sync, Gist, folder, URL, sync codes)
     storage.js          — Browser storage wrapper with transparent at-rest encryption
     auto-detect.js      — PPI pattern detection (IPs, addresses, paths, proper nouns)
+    document-scanner.js — PDF/DOCX/XLSX/ODT/RTF text extraction and scanning
     import-parser.js    — Bulk import from CSV, password managers, autofill exports
     version-history.js  — Sync version snapshots + rollback
     merge.js            — Three-way field-level merge for sync conflicts

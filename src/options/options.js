@@ -274,6 +274,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('#newDomain').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') addDomain();
   });
+  renderSuggestedDomains();
+
+  // Bulk add domains
+  $('#btnBulkAddDomains').addEventListener('click', () => {
+    const section = $('#bulkDomainSection');
+    section.style.display = section.style.display === 'none' ? 'block' : 'none';
+  });
+  $('#btnCancelBulkDomains').addEventListener('click', () => {
+    $('#bulkDomainSection').style.display = 'none';
+    $('#bulkDomainText').value = '';
+    $('#bulkDomainStatus').textContent = '';
+  });
+  $('#btnApplyBulkDomains').addEventListener('click', bulkAddDomains);
 
   // Settings listeners
   $('#showHighlights').addEventListener('change', async (e) => {
@@ -560,42 +573,117 @@ async function renderLog() {
 }
 
 // --- Custom Domains ---
-async function addDomain() {
-  let domain = $('#newDomain').value.trim();
-  if (!domain) return;
 
-  // Normalize: ensure it has a protocol
+// Suggested popular domains (not already built-in)
+const SUGGESTED_DOMAINS = [
+  { label: 'OpenWebUI', url: 'https://openwebui.local' },
+  { label: 'Ollama Web', url: 'http://localhost:3000' },
+  { label: 'text-generation-webui', url: 'http://localhost:7860' },
+  { label: 'Jan.ai', url: 'https://jan.ai' },
+  { label: 'You.com', url: 'https://you.com' },
+  { label: 'Phind', url: 'https://www.phind.com' },
+  { label: 'Cohere', url: 'https://coral.cohere.com' },
+  { label: 'Mistral', url: 'https://chat.mistral.ai' },
+  { label: 'Pi AI', url: 'https://pi.ai' },
+  { label: 'Notion AI', url: 'https://www.notion.so' },
+  { label: 'Quora', url: 'https://www.quora.com' },
+  { label: 'Discord', url: 'https://discord.com' },
+  { label: 'Slack', url: 'https://app.slack.com' },
+  { label: 'Jira', url: 'https://atlassian.net' },
+  { label: 'Linear', url: 'https://linear.app' },
+  { label: 'Bitbucket', url: 'https://bitbucket.org' },
+];
+
+function normalizeDomain(raw) {
+  let domain = raw.trim();
+  if (!domain) return null;
   if (!domain.startsWith('http://') && !domain.startsWith('https://')) {
     domain = 'https://' + domain;
   }
-  // Strip trailing slashes
-  domain = domain.replace(/\/+$/, '');
+  return domain.replace(/\/+$/, '');
+}
 
+async function addSingleDomain(domain) {
   const domains = settings.customDomains || [];
-  if (domains.includes(domain)) {
-    alert('Domain already added.');
-    return;
-  }
+  if (domains.includes(domain)) return { added: false, reason: 'duplicate' };
 
-  // Request browser permission for this domain
   try {
-    const granted = await api.permissions.request({
-      origins: [domain + '/*'],
-    });
-    if (!granted) {
-      alert('Permission denied. The extension needs access to this domain to work.');
-      return;
-    }
+    const granted = await api.permissions.request({ origins: [domain + '/*'] });
+    if (!granted) return { added: false, reason: 'denied' };
   } catch (e) {
-    // Firefox or older Chrome may not support optional permissions this way
     console.warn('[Silent Send] Could not request permission:', e);
   }
 
   domains.push(domain);
   settings.customDomains = domains;
   await Storage.saveSettings({ customDomains: domains });
+  return { added: true };
+}
+
+async function addDomain() {
+  const domain = normalizeDomain($('#newDomain').value);
+  if (!domain) return;
+
+  const result = await addSingleDomain(domain);
+  if (!result.added) {
+    if (result.reason === 'duplicate') alert('Domain already added.');
+    else alert('Permission denied. The extension needs access to this domain to work.');
+    return;
+  }
+
   renderDomains();
+  renderSuggestedDomains();
   $('#newDomain').value = '';
+}
+
+async function bulkAddDomains() {
+  const text = $('#bulkDomainText').value;
+  const lines = text.split(/[\n,]+/).map(l => l.trim()).filter(Boolean);
+  if (lines.length === 0) return;
+
+  let added = 0, skipped = 0;
+  for (const line of lines) {
+    const domain = normalizeDomain(line);
+    if (!domain) { skipped++; continue; }
+    const result = await addSingleDomain(domain);
+    if (result.added) added++;
+    else skipped++;
+  }
+
+  renderDomains();
+  renderSuggestedDomains();
+  $('#bulkDomainStatus').textContent = `Added ${added}, skipped ${skipped}`;
+  if (added > 0) $('#bulkDomainText').value = '';
+}
+
+function renderSuggestedDomains() {
+  const container = $('#suggestedDomains');
+  if (!container) return;
+  const domains = settings.customDomains || [];
+
+  // Filter out suggestions that are already added
+  const available = SUGGESTED_DOMAINS.filter(s => !domains.includes(s.url));
+  if (available.length === 0) {
+    safeHTML(container, '<span style="font-size:11px;color:#9ca3af">All suggestions added!</span>');
+    return;
+  }
+
+  safeHTML(container, available.map(s =>
+    `<button class="btn-suggest-domain" data-url="${escapeHtml(s.url)}" title="${escapeHtml(s.url)}" style="font-size:11px;padding:3px 8px;border:1px solid #d1d5db;border-radius:12px;background:#fff;cursor:pointer;color:#374151;white-space:nowrap">+ ${escapeHtml(s.label)}</button>`
+  ).join(''));
+
+  container.querySelectorAll('.btn-suggest-domain').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const domain = btn.dataset.url;
+      const result = await addSingleDomain(domain);
+      if (result.added) {
+        renderDomains();
+        renderSuggestedDomains();
+      } else if (result.reason === 'denied') {
+        alert('Permission denied for ' + domain);
+      }
+    });
+  });
 }
 
 function renderDomains() {
@@ -610,12 +698,86 @@ function renderDomains() {
   safeHTML(list, domains
     .map((d, i) => `
       <div class="domain-item" style="display:flex;align-items:center;justify-content:space-between;padding:8px;background:#f9fafb;border-radius:6px;margin-bottom:4px">
-        <span style="font-size:13px;font-family:monospace">${escapeHtml(d)}</span>
-        <button class="btn btn-sm btn-danger btn-remove-domain" data-index="${i}">&times;</button>
+        <span class="domain-text" style="font-size:13px;font-family:monospace;flex:1;overflow:hidden;text-overflow:ellipsis">${escapeHtml(d)}</span>
+        <div style="display:flex;gap:4px;margin-left:8px">
+          <button class="btn btn-sm btn-edit-domain" data-index="${i}" title="Edit">&#9998;</button>
+          <button class="btn btn-sm btn-danger btn-remove-domain" data-index="${i}" title="Remove">&times;</button>
+        </div>
       </div>
     `)
     .join(''));
 
+  // Edit handlers
+  list.querySelectorAll('.btn-edit-domain').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const idx = parseInt(btn.dataset.index, 10);
+      const domains = settings.customDomains || [];
+      const current = domains[idx];
+      const row = btn.closest('.domain-item');
+      const textEl = row.querySelector('.domain-text');
+
+      // Replace text with input
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = current;
+      input.style.cssText = 'flex:1;font-size:12px;font-family:monospace;padding:3px 6px;border:1px solid #3b82f6;border-radius:4px;outline:none;min-width:0';
+      textEl.replaceWith(input);
+      input.focus();
+      input.select();
+
+      // Replace edit button with save button
+      btn.textContent = '\u2713';
+      btn.title = 'Save';
+      btn.style.color = '#10b981';
+
+      const save = async () => {
+        const newDomain = normalizeDomain(input.value);
+        if (!newDomain || newDomain === current) {
+          renderDomains();
+          return;
+        }
+
+        if (domains.includes(newDomain)) {
+          alert('Domain already exists.');
+          renderDomains();
+          return;
+        }
+
+        // Request permission for new domain
+        try {
+          const granted = await api.permissions.request({ origins: [newDomain + '/*'] });
+          if (!granted) {
+            alert('Permission denied for ' + newDomain);
+            renderDomains();
+            return;
+          }
+        } catch (e) { /* non-fatal */ }
+
+        // Revoke old permission
+        try {
+          await api.permissions.remove({ origins: [current + '/*'] });
+        } catch (e) { /* non-fatal */ }
+
+        domains[idx] = newDomain;
+        settings.customDomains = domains;
+        await Storage.saveSettings({ customDomains: domains });
+        renderDomains();
+        renderSuggestedDomains();
+      };
+
+      btn.onclick = save;
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') save();
+        if (e.key === 'Escape') renderDomains();
+      });
+      input.addEventListener('blur', () => {
+        // Small delay to allow button click to fire first
+        setTimeout(() => { if (document.contains(input)) renderDomains(); }, 150);
+      });
+    });
+  });
+
+  // Remove handlers
   list.querySelectorAll('.btn-remove-domain').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const idx = parseInt(btn.dataset.index, 10);
@@ -624,7 +786,6 @@ function renderDomains() {
       settings.customDomains = domains;
       await Storage.saveSettings({ customDomains: domains });
 
-      // Revoke browser permission for the removed domain
       if (removed) {
         try {
           await api.permissions.remove({ origins: [removed + '/*'] });
@@ -632,6 +793,7 @@ function renderDomains() {
       }
 
       renderDomains();
+      renderSuggestedDomains();
     });
   });
 }

@@ -242,6 +242,15 @@ async function initUnlockedUI() {
     });
   }
 
+  // --- Popup domain management ---
+  renderPopupDomains();
+  renderPopupDomainSuggestions();
+
+  $('#btnPopupAddDomain').addEventListener('click', popupAddDomain);
+  $('#popupNewDomain').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') popupAddDomain();
+  });
+
   // Update privacy note based on encryption state
   const encEnabled = await Storage._isAtRestEncryptionEnabled();
   const encNote = $('#privacyEncNote');
@@ -898,6 +907,114 @@ function escapeRegex(str) {
 function updateStatusDot() {
   const dot = $('#statusDot');
   dot.classList.toggle('disabled', !settings.enabled);
+}
+
+// --- Popup Domain Management ---
+
+const POPUP_SUGGESTED_DOMAINS = [
+  { label: 'Mistral', url: 'https://chat.mistral.ai' },
+  { label: 'Cohere', url: 'https://coral.cohere.com' },
+  { label: 'Phind', url: 'https://www.phind.com' },
+  { label: 'You.com', url: 'https://you.com' },
+  { label: 'Pi AI', url: 'https://pi.ai' },
+  { label: 'Discord', url: 'https://discord.com' },
+  { label: 'Slack', url: 'https://app.slack.com' },
+  { label: 'Notion', url: 'https://www.notion.so' },
+  { label: 'Linear', url: 'https://linear.app' },
+  { label: 'Bitbucket', url: 'https://bitbucket.org' },
+];
+
+function normalizeDomain(raw) {
+  let d = raw.trim();
+  if (!d) return null;
+  if (!d.startsWith('http://') && !d.startsWith('https://')) d = 'https://' + d;
+  return d.replace(/\/+$/, '');
+}
+
+async function popupAddDomain() {
+  const domain = normalizeDomain($('#popupNewDomain').value);
+  if (!domain) return;
+
+  const domains = settings.customDomains || [];
+  if (domains.includes(domain)) return;
+
+  try {
+    const granted = await api.permissions.request({ origins: [domain + '/*'] });
+    if (!granted) return;
+  } catch (e) { /* non-fatal */ }
+
+  domains.push(domain);
+  settings.customDomains = domains;
+  await Storage.saveSettings({ customDomains: domains });
+  $('#popupNewDomain').value = '';
+  renderPopupDomains();
+  renderPopupDomainSuggestions();
+}
+
+function renderPopupDomains() {
+  const list = $('#popupDomainList');
+  if (!list) return;
+  const domains = settings.customDomains || [];
+
+  if (domains.length === 0) {
+    safeHTML(list, '<div style="font-size:11px;color:#9ca3af;padding:4px 0">No custom domains added</div>');
+    return;
+  }
+
+  safeHTML(list, domains.map((d, i) => `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:3px 6px;background:#f9fafb;border-radius:4px;margin-bottom:2px">
+      <span style="font-size:11px;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${escapeHtml(d)}</span>
+      <button class="btn-popup-remove-domain" data-index="${i}" style="border:none;background:none;color:#9ca3af;cursor:pointer;font-size:14px;padding:0 2px;line-height:1" title="Remove">&times;</button>
+    </div>
+  `).join(''));
+
+  list.querySelectorAll('.btn-popup-remove-domain').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const idx = parseInt(btn.dataset.index, 10);
+      const domains = settings.customDomains || [];
+      const removed = domains.splice(idx, 1)[0];
+      settings.customDomains = domains;
+      await Storage.saveSettings({ customDomains: domains });
+      if (removed) {
+        try { await api.permissions.remove({ origins: [removed + '/*'] }); } catch (e) { /* non-fatal */ }
+      }
+      renderPopupDomains();
+      renderPopupDomainSuggestions();
+    });
+  });
+}
+
+function renderPopupDomainSuggestions() {
+  const container = $('#popupDomainSuggestions');
+  if (!container) return;
+  const domains = settings.customDomains || [];
+
+  const available = POPUP_SUGGESTED_DOMAINS.filter(s => !domains.includes(s.url));
+  if (available.length === 0) {
+    container.replaceChildren();
+    return;
+  }
+
+  safeHTML(container, available.slice(0, 6).map(s =>
+    `<button class="btn-popup-suggest" data-url="${escapeHtml(s.url)}" title="${escapeHtml(s.url)}" style="font-size:10px;padding:2px 6px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;cursor:pointer;color:#6b7280;white-space:nowrap">+ ${escapeHtml(s.label)}</button>`
+  ).join(''));
+
+  container.querySelectorAll('.btn-popup-suggest').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const domain = btn.dataset.url;
+      const domains = settings.customDomains || [];
+      if (domains.includes(domain)) return;
+      try {
+        const granted = await api.permissions.request({ origins: [domain + '/*'] });
+        if (!granted) return;
+      } catch (e) { /* non-fatal */ }
+      domains.push(domain);
+      settings.customDomains = domains;
+      await Storage.saveSettings({ customDomains: domains });
+      renderPopupDomains();
+      renderPopupDomainSuggestions();
+    });
+  });
 }
 
 // --- Util ---

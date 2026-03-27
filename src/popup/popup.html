@@ -237,6 +237,19 @@
       </div>
 
       <div style="margin-top:12px;padding-top:10px;border-top:1px solid #e5e7eb">
+        <div class="setting-label" style="margin-bottom:6px">
+          <strong>Custom Domains</strong>
+          <span class="setting-desc">Add sites beyond the built-in list</span>
+        </div>
+        <div id="popupDomainList" style="max-height:120px;overflow-y:auto;margin-bottom:6px"></div>
+        <div style="display:flex;gap:4px">
+          <input type="text" id="popupNewDomain" placeholder="https://ai.example.com" style="flex:1;font-size:11px;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;min-width:0">
+          <button class="btn" id="btnPopupAddDomain" style="font-size:11px;padding:4px 8px;white-space:nowrap">Add</button>
+        </div>
+        <div id="popupDomainSuggestions" style="margin-top:6px;display:flex;flex-wrap:wrap;gap:3px"></div>
+      </div>
+
+      <div style="margin-top:12px;padding-top:10px;border-top:1px solid #e5e7eb">
         <button class="btn" id="btnOpenFullOptions" style="width:100%;font-size:12px">Open Full Options Page</button>
         <p class="help-text" style="margin-top:6px;text-align:center">Sync, encryption, org, version history, import/export, and more</p>
       </div>

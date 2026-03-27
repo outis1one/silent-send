@@ -519,12 +519,31 @@
       <h2>Custom Domains</h2>
       <p class="section-desc">Add domains for self-hosted AI services (like OpenWebUI). The extension will activate on these domains in addition to the built-in ones.</p>
       <div class="domain-list" id="domainList"></div>
-      <div class="add-row">
-        <input type="text" id="newDomain" placeholder="https://ai.myserver.com" class="input" style="flex:2">
+      <div class="add-row" style="flex-wrap:wrap;gap:8px">
+        <input type="text" id="newDomain" placeholder="https://ai.myserver.com" class="input" style="flex:2;min-width:200px">
         <button class="btn btn-primary" id="btnAddDomain">Add Domain</button>
+        <button class="btn" id="btnBulkAddDomains">Bulk Add</button>
       </div>
+
+      <!-- Suggested domains -->
+      <div style="margin-top:10px">
+        <label style="font-size:12px;font-weight:500;color:#374151;display:block;margin-bottom:4px">Quick add popular sites:</label>
+        <div id="suggestedDomains" style="display:flex;flex-wrap:wrap;gap:4px"></div>
+      </div>
+
+      <!-- Bulk add textarea (hidden by default) -->
+      <div id="bulkDomainSection" style="display:none;margin-top:10px;padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px">
+        <label style="font-size:12px;font-weight:500;color:#374151;display:block;margin-bottom:4px">Paste domains (one per line):</label>
+        <textarea id="bulkDomainText" rows="5" placeholder="https://ai.example.com&#10;https://openwebui.local&#10;myai.company.com" style="width:100%;box-sizing:border-box;font-size:12px;font-family:monospace;padding:8px;border:1px solid #d1d5db;border-radius:6px;resize:vertical"></textarea>
+        <div style="display:flex;gap:8px;margin-top:6px">
+          <button class="btn btn-primary btn-sm" id="btnApplyBulkDomains">Add All</button>
+          <button class="btn btn-sm" id="btnCancelBulkDomains">Cancel</button>
+          <span id="bulkDomainStatus" style="font-size:11px;color:#6b7280;align-self:center"></span>
+        </div>
+      </div>
+
       <p class="section-desc" style="margin-top:8px;margin-bottom:0">
-        When you click "Add Domain", your browser will ask you to confirm access. No extra steps needed.
+        When you add a domain, your browser will ask you to confirm access. No extra steps needed.
       </p>
     </section>
 

@@ -8,13 +8,16 @@ A browser extension (Chrome, Firefox, and Safari) that intercepts personal infor
 |---------|---------|--------|
 | Claude | claude.ai, claude.ai/code | Tested |
 | ChatGPT | chatgpt.com, chat.openai.com | Tested |
+| Copilot | copilot.microsoft.com | Untested |
 | Grok | grok.x.ai, x.com/i/grok | Untested |
 | Gemini | gemini.google.com | Untested |
 | OpenWebUI | localhost, 127.0.0.1, or custom domain | Untested |
 
-> **Note:** Only Claude has been tested so far. The other services have API interception patterns defined but may need adjustments. PRs welcome.
+> **Browsers:** Chrome, Edge, Brave, Firefox, and Safari. Edge and Brave use the Chrome extension directly.
 >
-> **Browsers:** Chrome, Firefox (signed .xpi), and Safari (via Xcode project). All three use the same core code.
+> **Desktop apps** (Claude, ChatGPT, Copilot) bypass the browser — use the web version with the extension for PPI protection.
+>
+> **Note:** Claude and ChatGPT are tested. Other services have interception patterns defined but may need adjustments. PRs welcome.
 
 ## How it works
 

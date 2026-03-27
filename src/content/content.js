@@ -1553,8 +1553,8 @@
   function revealInElement(el) {
     if (SKIP_REVEAL_TAGS.has(el.tagName)) return;
     if (el.classList?.contains('ss-reveal-badge')) return;
-    // Never touch contenteditable elements (chat input boxes)
     if (el.isContentEditable) return;
+    if (isInNonChatArea(el)) return;
 
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
@@ -1562,6 +1562,7 @@
         if (parent && SKIP_REVEAL_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
         if (parent?.closest?.('.ss-autodetect-warning, .ss-presend-warning, .ss-reveal-badge')) return NodeFilter.FILTER_REJECT;
         if (parent?.closest?.('[contenteditable="true"]')) return NodeFilter.FILTER_REJECT;
+        if (isInNonChatArea(parent)) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }
     });
@@ -1581,11 +1582,13 @@
   function unrevealInElement(el) {
     if (SKIP_REVEAL_TAGS.has(el.tagName)) return;
     if (el.isContentEditable) return;
+    if (isInNonChatArea(el)) return;
 
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
         const parent = node.parentElement;
         if (parent?.closest?.('[contenteditable="true"]')) return NodeFilter.FILTER_REJECT;
+        if (isInNonChatArea(parent)) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }
     });
@@ -1620,6 +1623,7 @@
         if (parent && SKIP_REVEAL_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
         if (parent?.closest?.('.ss-autodetect-warning, .ss-presend-warning, .ss-reveal-badge')) return NodeFilter.FILTER_REJECT;
         if (parent?.closest?.('[contenteditable="true"]')) return NodeFilter.FILTER_REJECT;
+        if (isInNonChatArea(parent)) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }
     });
@@ -1658,10 +1662,17 @@
     }
   }
 
-  // Elements to skip when revealing (inputs, scripts, styles, extension UI)
+  // Elements to skip when revealing (inputs, scripts, styles, extension UI, navigation)
   const SKIP_REVEAL_TAGS = new Set([
     'SCRIPT', 'STYLE', 'NOSCRIPT', 'IFRAME', 'INPUT', 'TEXTAREA', 'SELECT',
+    'NAV', 'ASIDE', 'HEADER', 'FOOTER',
   ]);
+
+  // Skip reveal in navigation, sidebars, headers, and other non-chat UI
+  function isInNonChatArea(el) {
+    if (!el) return false;
+    return !!el.closest('nav, aside, header, footer, [role="navigation"], [role="banner"], [role="complementary"], [data-sidebar], [class*="sidebar"], [class*="Sidebar"], [class*="nav-"], [class*="Nav"], [class*="menu"], [class*="Menu"], [class*="header"], [class*="Header"]');
+  }
 
   // Reveal ALL text on the page + apply highlights
   function revealAllResponses() {
@@ -1700,10 +1711,11 @@
           // Only do text replacement in reveal mode
           if (settings.revealMode) {
             if (node.nodeType === Node.ELEMENT_NODE) {
-              // Skip contenteditable (chat input) and skipped tags
+              // Skip non-chat areas, contenteditable, and skipped tags
               if (!SKIP_REVEAL_TAGS.has(node.tagName) &&
                   !node.isContentEditable &&
-                  !node.closest?.('[contenteditable="true"]')) {
+                  !node.closest?.('[contenteditable="true"]') &&
+                  !isInNonChatArea(node)) {
                 revealInElement(node);
               }
             } else if (node.nodeType === Node.TEXT_NODE) {

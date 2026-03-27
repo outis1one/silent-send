@@ -105,7 +105,7 @@
             url: location.href,
           });
           // Trim
-          if (log.length > 200) log.length = 200;
+          if (log.length > 100) log.length = 100;
           await api.storage.local.set({ ss_activity_log: log });
         }
       }

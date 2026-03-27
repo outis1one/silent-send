@@ -12,8 +12,9 @@
  * 5. Custom HTTP endpoint — any URL supporting GET + PUT (WebDAV,
  *    self-hosted server, cloud function, etc.).
  *
- * Encryption: all sync channels can optionally encrypt data with a
- * password (AES-256-GCM) and/or require TOTP verification.
+ * Encryption: all sync channels REQUIRE encryption with a password
+ * (AES-256-GCM) and/or TOTP verification. Syncing without encryption
+ * is not permitted — users must set up encryption before enabling sync.
  * Authentication is cached with a configurable TTL so the user only
  * needs to authenticate when the cache expires and new data exists.
  *
@@ -370,6 +371,9 @@ const SilentSendSync = {
     const StorageModule = (await import('./storage.js')).default;
     await StorageModule.decryptAllData();
 
+    // Disable all sync channels since encryption is mandatory for sync
+    await StorageModule.saveSettings({ browserSync: false });
+
     await api.storage.local.remove('ss_sync_encryption');
     await SilentSendCrypto.clearCachedKey();
     await SilentSendCrypto.clearWebAuthnCredential();
@@ -415,7 +419,7 @@ const SilentSendSync = {
    */
   async _encryptForSync(data) {
     const config = await this._getSyncEncryption();
-    if (!config?.enabled) return { data, encrypted: false };
+    if (!config?.enabled) return { data: null, encrypted: false, needsEncryption: true };
 
     const keyInfo = await this._getEncryptionKey();
     if (!keyInfo) {
@@ -507,12 +511,15 @@ const SilentSendSync = {
   async exportSyncCode() {
     const data = await this._getAllData();
 
-    // Encrypt if enabled
+    // Encrypt (mandatory)
     const result = await this._encryptForSync(data);
+    if (result.needsEncryption) {
+      return { needsEncryption: true };
+    }
     if (result.needsAuth) {
       return { needsAuth: true };
     }
-    const payload = result.data || data;
+    const payload = result.data;
 
     const json = JSON.stringify(payload);
     return btoa(unescape(encodeURIComponent(json)));
@@ -568,10 +575,10 @@ const SilentSendSync = {
     try {
       const data = await this._getAllData();
 
-      // Encrypt if enabled
+      // Encrypt (mandatory)
       const result = await this._encryptForSync(data);
-      if (result.needsAuth) return; // silently skip — will sync on next auth
-      const payload = result.data || data;
+      if (result.needsEncryption || result.needsAuth) return; // skip — encryption required
+      const payload = result.data;
 
       const json = JSON.stringify(payload);
 
@@ -637,12 +644,15 @@ const SilentSendSync = {
     try {
       const data = await this._getAllData();
 
-      // Encrypt if enabled
+      // Encrypt (mandatory)
       const encResult = await this._encryptForSync(data);
+      if (encResult.needsEncryption) {
+        return { success: false, needsEncryption: true, reason: 'Encryption must be enabled before syncing.' };
+      }
       if (encResult.needsAuth) {
         return { success: false, needsAuth: true, reason: 'Authentication required.' };
       }
-      const payload = encResult.data || data;
+      const payload = encResult.data;
 
       const content = JSON.stringify(payload, null, 2);
       const stored = await api.storage.local.get('ss_gist_id');
@@ -738,10 +748,13 @@ const SilentSendSync = {
       const data = await this._getAllData();
 
       const encResult = await this._encryptForSync(data);
+      if (encResult.needsEncryption) {
+        return { success: false, needsEncryption: true, reason: 'Encryption must be enabled before syncing.' };
+      }
       if (encResult.needsAuth) {
         return { success: false, needsAuth: true, reason: 'Authentication required.' };
       }
-      const payload = encResult.data || data;
+      const payload = encResult.data;
 
       const resp = await fetch(url, {
         method,

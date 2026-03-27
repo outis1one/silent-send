@@ -30,7 +30,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('#autoDetect').checked = settings.autoDetect !== false;
   $('#autoRedactDetected').checked = settings.autoRedactDetected !== false;
   $('#autoAddDetected').checked = settings.autoAddDetected !== false;
-  $('#maxLogEntries').value = settings.maxLogEntries || 200;
+  $('#maxLogEntries').value = settings.maxLogEntries || 100;
   $('#browserSync').checked = settings.browserSync === true;
 
   renderMappings();
@@ -51,17 +51,28 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // --- Sync section ---
   $('#browserSync').addEventListener('change', async (e) => {
-    await Storage.saveSettings({ browserSync: e.target.checked });
     if (e.target.checked) {
+      const encEnabled = await SilentSendSync.isEncryptionEnabled();
+      if (!encEnabled) {
+        e.target.checked = false;
+        setSyncStatus('Encryption must be enabled before syncing. Set up encryption first.', 'error');
+        return;
+      }
+      await Storage.saveSettings({ browserSync: true });
       await SilentSendSync.pushToSyncStorage();
       setSyncStatus('Browser account sync enabled. Your settings will sync automatically.', 'ok');
     } else {
+      await Storage.saveSettings({ browserSync: false });
       setSyncStatus('Browser account sync disabled.', 'neutral');
     }
   });
 
   $('#btnGenerateSyncCode').addEventListener('click', async () => {
     const code = await SilentSendSync.exportSyncCode();
+    if (code?.needsEncryption) {
+      setSyncStatus('Encryption must be enabled before syncing. Set up encryption first.', 'error');
+      return;
+    }
     if (code?.needsAuth) {
       setSyncStatus('Authentication required to encrypt sync code.', 'warn');
       showSyncAuthPrompt();
@@ -168,7 +179,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!token) { setGistSyncStatus('Enter your GitHub PAT first.', 'warn'); return; }
     setGistSyncStatus('Pushing…', 'neutral');
     const r = await SilentSendSync.pushToGist(token);
-    if (r.needsAuth) {
+    if (r.needsEncryption) {
+      setGistSyncStatus('Encryption must be enabled before syncing.', 'error');
+    } else if (r.needsAuth) {
       setGistSyncStatus('Authentication required to encrypt.', 'warn');
       showSyncAuthPrompt();
     } else if (r.success) {
@@ -207,7 +220,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const headers = parseHeadersField($('#customSyncHeaders').value);
     setUrlSyncStatus('Pushing…', 'neutral');
     const r = await SilentSendSync.pushToUrl({ url, headers });
-    if (r.needsAuth) {
+    if (r.needsEncryption) {
+      setUrlSyncStatus('Encryption must be enabled before syncing.', 'error');
+    } else if (r.needsAuth) {
       setUrlSyncStatus('Authentication required to encrypt.', 'warn');
       showSyncAuthPrompt();
     } else if (r.success) {
@@ -282,7 +297,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   $('#maxLogEntries').addEventListener('change', async (e) => {
-    await Storage.saveSettings({ maxLogEntries: parseInt(e.target.value, 10) || 200 });
+    await Storage.saveSettings({ maxLogEntries: parseInt(e.target.value, 10) || 100 });
   });
 
   // Add mapping
@@ -959,8 +974,9 @@ async function initSyncEncryptionUI() {
   $('#btnDisableEncryption').addEventListener('click', async () => {
     if (!window.confirm('Disable sync encryption? Existing encrypted sync data will become unreadable.')) return;
     await SilentSendSync.disableEncryption();
+    $('#browserSync').checked = false;
     showEncryptionNotConfigured();
-    setSyncEncStatus('Encryption disabled.', 'neutral');
+    setSyncEncStatus('Encryption disabled. All sync channels have been turned off.', 'neutral');
   });
 
   // Change password

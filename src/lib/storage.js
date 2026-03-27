@@ -38,7 +38,7 @@ const DEFAULT_SETTINGS = {
   autoDetect: true,
   autoRedactDetected: true,
   autoAddDetected: true,
-  maxLogEntries: 200,
+  maxLogEntries: 100,
   customDomains: [],
   categories: ['name', 'email', 'phone', 'address', 'ssn', 'dob', 'domain', 'password', 'general'],
   browserSync: false,

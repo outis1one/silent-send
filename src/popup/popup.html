@@ -33,6 +33,7 @@
       <button class="tab" data-tab="mappings">Mappings</button>
       <button class="tab" data-tab="activity">Activity</button>
       <button class="tab" data-tab="test">Test</button>
+      <button class="tab" data-tab="options">Options</button>
     </nav>
 
     <!-- Locked State Overlay -->
@@ -191,6 +192,54 @@
       </div>
 
       <div class="test-identity-status" id="identityStatus"></div>
+    </section>
+
+    <!-- Options Tab -->
+    <section class="tab-content" id="tab-options">
+      <div class="setting-item">
+        <div class="setting-label">
+          <strong>Secret scanning</strong>
+          <span class="setting-desc">Auto-redact API keys, tokens, passwords, SSNs, credit cards</span>
+        </div>
+        <label class="toggle"><input type="checkbox" id="optSecretScanning" checked><span class="toggle-slider"></span></label>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-label">
+          <strong>Auto-detect PPI</strong>
+          <span class="setting-desc">Warn about unconfigured personal data (IPs, addresses, paths)</span>
+        </div>
+        <label class="toggle"><input type="checkbox" id="optAutoDetect" checked><span class="toggle-slider"></span></label>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-label">
+          <strong>Auto-redact detected PPI</strong>
+          <span class="setting-desc">Replace detected PPI with placeholders on send</span>
+        </div>
+        <label class="toggle"><input type="checkbox" id="optAutoRedact" checked><span class="toggle-slider"></span></label>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-label">
+          <strong>Show highlights</strong>
+          <span class="setting-desc">Highlight substituted values in AI responses</span>
+        </div>
+        <label class="toggle"><input type="checkbox" id="optHighlights"><span class="toggle-slider"></span></label>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-label">
+          <strong>Document scan preview</strong>
+          <span class="setting-desc">Show PPI findings before uploading documents</span>
+        </div>
+        <label class="toggle"><input type="checkbox" id="optDocPreview" checked><span class="toggle-slider"></span></label>
+      </div>
+
+      <div style="margin-top:12px;padding-top:10px;border-top:1px solid #e5e7eb">
+        <button class="btn" id="btnOpenFullOptions" style="width:100%;font-size:12px">Open Full Options Page</button>
+        <p class="help-text" style="margin-top:6px;text-align:center">Sync, encryption, org, version history, import/export, and more</p>
+      </div>
     </section>
 
     <!-- Footer -->

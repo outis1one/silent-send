@@ -166,12 +166,22 @@ Remap in Chrome: `chrome://extensions/shortcuts` | Firefox: `about:addons` → g
 
 ## How to verify it's working
 
-- **Badge count** on the extension icon shows substitutions per page
-- **Activity tab** in the popup shows a timestamped log of every substitution
-- **Test tab** in the popup lets you type text and see the before/after diff live
-- **Options tab** in the popup gives quick access to key settings (secret scanning, auto-detect, highlights, document scan preview)
-- **Reveal mode** (eye icon or `Alt+Shift+R`) shows your real data in AI responses for easy copy/paste
-- **Browser DevTools** → Console shows `[Silent Send] Substituted N value(s)` messages
+1. **Test tab** — click the extension icon → Test tab. Type text containing your real data and see the substituted version live, highlighted in green. This is the quickest way to confirm your identity is configured correctly.
+
+2. **Badge count** — after sending a message, the extension icon shows a green number (e.g. "3") indicating how many substitutions were made. If you see a number, it's working.
+
+3. **Inspect the actual network request** — this proves your real data never reaches the AI:
+   - Open browser DevTools (F12) → **Network** tab
+   - Send a message containing your real data
+   - Find the POST request to the AI service (e.g. `chat/completions` or `conversation`)
+   - Click it → **Payload** or **Request** tab
+   - Search for your real data — it should not be there. You should only see the replaced data.
+
+4. **Activity tab** — click the extension icon → Activity tab. Shows a timestamped log of every substitution with the original and replaced values.
+
+5. **Console log** — DevTools (F12) → Console shows `[Silent Send] Substituted N value(s) in <url>` for each intercepted request.
+
+6. **Reveal mode** — toggle with the eye icon or `Alt+Shift+R`. When on, the AI's responses display your real data instead of the replaced values. When off, you see what the AI actually received. If toggling changes the text, substitution is working.
 
 ## Installation
 
@@ -324,15 +334,6 @@ open safari-build/Silent\ Send.xcodeproj
 4. If Safari says the extension is unsigned:
    - Safari menu → **Settings → Advanced** → check "Show features for web developers"
    - Safari menu → **Develop → Allow Unsigned Extensions** (you'll need to re-enable this every time Safari restarts)
-
-#### Distribute via the App Store
-
-1. In Xcode, select your Apple Developer Team in **Signing & Capabilities**
-2. **Product → Archive**
-3. **Distribute App → App Store Connect**
-4. Fill in the App Store listing at [App Store Connect](https://appstoreconnect.apple.com/)
-
-You'll need: screenshots (1280x800), privacy policy URL, description, and keywords.
 
 ## Custom domains (OpenWebUI, etc.)
 
@@ -502,41 +503,26 @@ These are standard browser management features — Silent Send does not attempt 
 
 Reveal mode only replaces values that were **actually substituted** in outbound messages during the current session. If the AI uses a word that happens to match one of your substitute values (e.g., the AI says "the user should..." and "user" is a configured substitute), it won't be falsely revealed as your real username.
 
+## What Silent Send can't catch
+
+Silent Send works well for text you type and most document uploads, but some things will get through:
+
+- **Images and screenshots** — can't scan pixels. A screenshot of your terminal with your username in it goes through unchanged.
+- **Scanned PDFs** — if the PDF is just an image with no text layer, there's nothing to substitute.
+- **Base64 and encoded data** — data embedded in encoded formats isn't detected.
+- **Names inside other words** — if your name is "Art", it won't catch "article" (word boundaries prevent most false positives, but edge cases exist).
+- **Data you haven't configured** — it can only substitute what you told it about, plus known secret formats. Your home address or employer name won't be caught unless you add them.
+- **Short names** — names under 3 characters are skipped for usernames/hostnames to avoid false positives.
+- **Custom secret formats** — the secret scanner knows common API key prefixes (sk-, ghp_, AKIA, etc.) but won't catch proprietary token formats your company uses.
+
+**Think of it like a spell checker for privacy** — it catches most things, but you should still glance at sensitive messages before sending.
+
 ## Disclaimer
 
-**Silent Send is not a battle-tested privacy application.** It is a convenience tool that reduces the chance of accidentally sharing personal information with AI services. It should not be relied upon as your sole privacy protection.
-
-**Estimated correctness: ~85-90%** for configured data. Things that can and will leak through:
-
-- **Images and screenshots** — Silent Send cannot scan pixels. If you paste a screenshot of a terminal with your real username in it, that goes through unchanged.
-- **File uploads** — PDFs, documents, and other file attachments are not scanned.
-- **Base64 and encoded data** — Data embedded in encoded formats is not detected.
-- **Names inside other words** — If your name is "Art", Silent Send may not catch "article" (it uses word boundaries, but edge cases exist).
-- **Unconfigured data** — It can only substitute what you told it about, plus known secret formats. Your home address, employer name, or project names won't be caught unless you add them as mappings.
-- **Short names** — Names under 3 characters are skipped for usernames/hostnames to avoid false positives.
-- **Non-standard secret formats** — The secret scanner knows common API key prefixes (sk-, ghp_, AKIA, etc.) but won't catch custom or proprietary token formats.
-
-**You should still review sensitive messages before sending.** Silent Send is a safety net, not a guarantee. Think of it like a spell checker for privacy — it catches most things, but you wouldn't send a legal document without proofreading.
-
-## Legal
-
-### Liability
-
-Silent Send is provided **"as is" without warranty of any kind**. The disclaimer section above explicitly documents known limitations. Users should not rely on Silent Send as their sole privacy protection.
-
-To mitigate litigation risk:
-- The extension clearly states it is a **convenience tool, not a security guarantee** in both the README and the popup footer
-- Known failure modes are documented (images, file uploads, encoded data, unconfigured data)
-- The "~85-90% correctness" estimate sets realistic expectations
-- No marketing claims of "complete protection" or "guaranteed privacy" are made
-- The BSL license includes standard liability limitation language
-
-This is comparable to how antivirus software, ad blockers, and password managers handle liability — they document limitations, disclaim warranties, and don't claim perfection. The key is to never overstate what the tool does.
-
-### Open source
-
-The source code is available under BSL 1.1. Contributions are welcome. If you find a bug, especially a privacy-related one, please report it.
+Silent Send is provided "as is" without warranty of any kind. It is a convenience tool that reduces the chance of accidentally sharing personal information with AI services. It is not a security guarantee and should not be your only privacy protection. The source code is available for inspection — you don't have to take our word for it.
 
 ## License
 
-[Business Source License 1.1](LICENSE) — free for personal, non-commercial use. Commercial use requires a paid license. The code automatically converts to MIT on March 26, 2030.
+[Business Source License 1.1](LICENSE) — free for personal, non-commercial use. Commercial use requires a paid license. The code converts to MIT on March 26, 2030.
+
+Contributions welcome. If you find a bug, especially a privacy-related one, please [open an issue](https://github.com/outis1one/silent-send/issues).

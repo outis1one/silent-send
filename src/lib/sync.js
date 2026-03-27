@@ -460,23 +460,42 @@ const SilentSendSync = {
   async _decryptFromSync(data) {
     if (!data?._ssEncrypted) return { data, decrypted: false };
 
-    // If this device has no encryption config yet, bootstrap from the sync envelope
+    // Always use the sync envelope's salt/verificationBlob for decryption,
+    // not the local config. Different devices have different salts, so the
+    // local key won't decrypt data encrypted with another device's salt.
     let config = await this._getSyncEncryption();
-    if (!config?.enabled && data._encConfig) {
-      // Save minimal config so authenticate() can work
+
+    if (data._encConfig) {
+      // Use the source's salt for this decryption, but don't overwrite
+      // the local config permanently yet — only if decryption succeeds
       config = {
+        ...(config || {}),
         enabled: true,
         salt: data._encConfig.salt,
         verificationBlob: data._encConfig.verificationBlob,
-        authMethod: 'password', // will be updated from _encMeta after decryption
-        ttlDays: 90,
-        webauthn: false,
       };
-      await this._saveSyncEncryption(config);
     }
 
-    const keyInfo = await this._getEncryptionKey();
+    if (!config?.enabled) {
+      return { data: null, decrypted: false, needsAuth: true };
+    }
+
+    // Try to get a key using the sync envelope's salt
+    // First check if we have a cached key that matches
+    let keyInfo = await SilentSendCrypto.getCachedKey();
+
+    // If the cached key's salt doesn't match the sync data's salt,
+    // we need to re-derive from the password
+    if (keyInfo && data._encConfig && keyInfo.salt !== data._encConfig.salt) {
+      keyInfo = null; // force re-auth with the correct salt
+    }
+
     if (!keyInfo) {
+      // Need the user to enter the password — save the sync salt temporarily
+      // so authenticate() uses it to derive the correct key
+      if (data._encConfig) {
+        await this._saveSyncEncryption(config);
+      }
       return { data: null, decrypted: false, needsAuth: true };
     }
 

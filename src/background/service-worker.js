@@ -25,6 +25,7 @@ const BUILTIN_URL_PATTERNS = [
   'https://claude.ai/*',
   'https://chatgpt.com/*',
   'https://chat.openai.com/*',
+  'https://copilot.microsoft.com/*',
   'https://grok.x.ai/*',
   'https://x.com/i/grok*',
   'https://gemini.google.com/*',

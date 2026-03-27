@@ -14,7 +14,8 @@
   function safeHTML(el, html) {
     const template = document.createElement('template');
     template.innerHTML = html;
-    el.replaceChildren(...template.content.childNodes);
+    // Convert to static array — childNodes is live and shrinks as nodes move
+    el.replaceChildren(...Array.from(template.content.childNodes));
   }
 
   // ============================================================
@@ -181,6 +182,32 @@
             replacements.push({ original: matched, replaced: sub, category: 'name', pattern: 'smart' });
             return sub;
           });
+          // Concatenated forms: JohnSmith, johnsmith, john.smith, john_smith, john-smith
+          // Also reversed: SmithJohn, smithjohn, smith.john, etc.
+          const f = first.real, l = last.real;
+          const fs = first.substitute, ls = last.substitute;
+          const concatPatterns = [
+            // first+last
+            [f + l, fs + ls],
+            [f + '.' + l, fs + '.' + ls],
+            [f + '_' + l, fs + '_' + ls],
+            [f + '-' + l, fs + '-' + ls],
+            // last+first
+            [l + f, ls + fs],
+            [l + '.' + f, ls + '.' + fs],
+            [l + '_' + f, ls + '_' + fs],
+            [l + '-' + f, ls + '-' + fs],
+          ];
+          for (const [real, sub] of concatPatterns) {
+            result = result.replace(new RegExp('\\b' + esc(real) + '\\b', 'gi'), (matched) => {
+              // Preserve case: all-lower→lower, ALL-UPPER→upper, else use sub as-is
+              let replacement = sub;
+              if (matched === matched.toLowerCase()) replacement = sub.toLowerCase();
+              else if (matched === matched.toUpperCase()) replacement = sub.toUpperCase();
+              replacements.push({ original: matched, replaced: replacement, category: 'name', pattern: 'smart-concat' });
+              return replacement;
+            });
+          }
         }
       }
 
@@ -355,17 +382,26 @@
 
   // Common English words that are capitalized but aren't proper nouns.
   // Used by the proper noun heuristic to reduce false positives.
+  // Includes common verbs, nouns, adjectives that appear in titles,
+  // headings, UI buttons, and instructions.
   const COMMON_CAPITALIZED = new Set([
+    // Prepositions, conjunctions, articles, pronouns
     'the', 'a', 'an', 'and', 'or', 'but', 'if', 'then', 'else', 'when',
     'at', 'by', 'for', 'with', 'about', 'against', 'between', 'through',
     'during', 'before', 'after', 'above', 'below', 'to', 'from', 'up',
     'down', 'in', 'out', 'on', 'off', 'over', 'under', 'again', 'further',
-    'then', 'once', 'here', 'there', 'all', 'each', 'every', 'both',
+    'once', 'here', 'there', 'all', 'each', 'every', 'both',
     'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not',
     'only', 'own', 'same', 'so', 'than', 'too', 'very', 'can', 'will',
     'just', 'should', 'now', 'also', 'into', 'could', 'would', 'may',
     'might', 'shall', 'must', 'need', 'have', 'has', 'had', 'do', 'does',
     'did', 'be', 'is', 'am', 'are', 'was', 'were', 'been', 'being',
+    'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her',
+    'us', 'them', 'my', 'your', 'his', 'its', 'our', 'their',
+    'this', 'that', 'these', 'those', 'what', 'who', 'how', 'why',
+    'which', 'where', 'when', 'while', 'since', 'because', 'although',
+    'however', 'therefore', 'moreover', 'furthermore', 'nevertheless',
+    // Common verbs (appear in titles, headings, buttons, instructions)
     'get', 'got', 'make', 'made', 'go', 'went', 'gone', 'take', 'took',
     'come', 'came', 'see', 'saw', 'know', 'knew', 'think', 'thought',
     'say', 'said', 'tell', 'told', 'give', 'gave', 'find', 'found',
@@ -378,25 +414,110 @@
     'buy', 'wait', 'serve', 'die', 'send', 'expect', 'build', 'stay',
     'fall', 'cut', 'reach', 'kill', 'remain', 'suggest', 'raise', 'pass',
     'sell', 'require', 'report', 'decide', 'pull', 'develop', 'note',
-    'however', 'because', 'although', 'since', 'while', 'where', 'which',
-    'what', 'who', 'how', 'why', 'this', 'that', 'these', 'those',
-    'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her',
-    'us', 'them', 'my', 'your', 'his', 'its', 'our', 'their',
-    'new', 'old', 'big', 'small', 'long', 'short', 'good', 'bad',
-    'great', 'little', 'right', 'left', 'first', 'last', 'next',
-    'sure', 'like', 'well', 'back', 'still', 'even', 'much', 'many',
-    // Programming/tech words that appear capitalized
+    'generate', 'design', 'manage', 'process', 'handle', 'check', 'verify',
+    'submit', 'apply', 'accept', 'reject', 'approve', 'deny', 'confirm',
+    'cancel', 'delete', 'remove', 'edit', 'modify', 'view', 'display',
+    'search', 'filter', 'sort', 'select', 'choose', 'pick', 'enter',
+    'input', 'output', 'upload', 'download', 'install', 'uninstall',
+    'enable', 'disable', 'activate', 'deactivate', 'toggle', 'switch',
+    'connect', 'disconnect', 'sync', 'refresh', 'reload', 'reset',
+    'save', 'load', 'store', 'restore', 'backup', 'export', 'import',
+    'copy', 'paste', 'drag', 'drop', 'click', 'press', 'hold', 'release',
+    'scroll', 'zoom', 'resize', 'expand', 'collapse', 'hide', 'reveal',
+    'lock', 'unlock', 'encrypt', 'decrypt', 'sign', 'register', 'login',
+    'logout', 'subscribe', 'unsubscribe', 'share', 'publish', 'deploy',
+    'launch', 'test', 'debug', 'fix', 'patch', 'merge', 'split', 'join',
+    'link', 'attach', 'detach', 'insert', 'append', 'prepend', 'wrap',
+    'format', 'parse', 'convert', 'transform', 'translate', 'compile',
+    'execute', 'render', 'animate', 'validate', 'sanitize', 'escape',
+    // Common nouns (appear in titles, headings, labels)
+    'account', 'action', 'address', 'alert', 'analysis', 'answer',
+    'application', 'area', 'article', 'asset', 'background', 'badge',
+    'banner', 'board', 'body', 'border', 'bottom', 'box', 'brand',
+    'browser', 'buffer', 'button', 'cache', 'calendar', 'card', 'case',
+    'category', 'center', 'channel', 'chart', 'chat', 'child', 'choice',
+    'class', 'client', 'cloud', 'cluster', 'code', 'collection', 'color',
+    'column', 'command', 'comment', 'community', 'company', 'component',
+    'config', 'configuration', 'connection', 'console', 'contact',
+    'container', 'content', 'context', 'control', 'corner', 'count',
+    'country', 'cover', 'custom', 'dashboard', 'data', 'database',
+    'date', 'day', 'default', 'description', 'design', 'desktop',
+    'detail', 'device', 'dialog', 'directory', 'document', 'domain',
+    'draft', 'driver', 'edge', 'editor', 'element', 'email', 'end',
+    'engine', 'entry', 'environment', 'error', 'event', 'example',
+    'exception', 'extension', 'feature', 'feedback', 'field', 'file',
+    'filter', 'folder', 'font', 'footer', 'form', 'format', 'frame',
+    'function', 'gallery', 'general', 'global', 'grid', 'group',
+    'guide', 'handler', 'header', 'health', 'help', 'helper', 'history',
+    'home', 'host', 'icon', 'image', 'index', 'info', 'input', 'instance',
+    'interface', 'issue', 'item', 'job', 'key', 'label', 'language',
+    'layout', 'level', 'library', 'light', 'limit', 'line', 'link',
+    'list', 'local', 'location', 'log', 'logo', 'main', 'manager',
+    'manual', 'map', 'margin', 'master', 'match', 'media', 'member',
+    'memory', 'menu', 'message', 'method', 'middle', 'mobile', 'modal',
+    'mode', 'model', 'module', 'monitor', 'name', 'navigation', 'network',
+    'node', 'note', 'notification', 'number', 'object', 'option',
+    'order', 'origin', 'output', 'overlay', 'overview', 'owner', 'package',
+    'padding', 'page', 'panel', 'parent', 'parser', 'password', 'path',
+    'pattern', 'permission', 'photo', 'pipeline', 'placeholder', 'plan',
+    'platform', 'player', 'plugin', 'point', 'policy', 'pool', 'popup',
+    'port', 'position', 'post', 'power', 'preview', 'primary', 'print',
+    'priority', 'process', 'product', 'profile', 'program', 'progress',
+    'project', 'prompt', 'property', 'protocol', 'provider', 'proxy',
+    'public', 'query', 'queue', 'quick', 'radio', 'range', 'rate',
+    'reader', 'record', 'region', 'release', 'remote', 'render',
+    'report', 'request', 'resource', 'response', 'result', 'review',
+    'role', 'root', 'route', 'row', 'rule', 'runtime', 'sample',
+    'scanner', 'schema', 'scope', 'screen', 'script', 'search',
+    'section', 'security', 'select', 'sender', 'server', 'service',
+    'session', 'setting', 'settings', 'setup', 'share', 'shell',
+    'shortcut', 'sidebar', 'signal', 'simple', 'single', 'site', 'size',
+    'slider', 'slot', 'snapshot', 'socket', 'solution', 'source', 'space',
+    'stage', 'standard', 'start', 'state', 'status', 'step', 'stop',
+    'storage', 'store', 'stream', 'string', 'style', 'subject',
+    'success', 'summary', 'support', 'switch', 'symbol', 'syntax',
+    'system', 'table', 'target', 'task', 'team', 'template', 'terminal',
+    'test', 'text', 'theme', 'thread', 'time', 'timer', 'title', 'token',
+    'tool', 'toolbar', 'tooltip', 'top', 'total', 'track', 'traffic',
+    'tree', 'trigger', 'type', 'unit', 'update', 'upload', 'user',
+    'util', 'utility', 'value', 'variable', 'version', 'video', 'view',
+    'virtual', 'warning', 'watch', 'web', 'widget', 'width', 'window',
+    'wizard', 'word', 'worker', 'workspace', 'wrapper', 'zone',
+    // Common adjectives
+    'active', 'advanced', 'available', 'basic', 'best', 'better', 'blank',
+    'bold', 'clean', 'clear', 'close', 'closed', 'complete', 'complex',
+    'connected', 'correct', 'critical', 'current', 'dark', 'deep',
+    'detailed', 'different', 'direct', 'double', 'dynamic', 'early',
+    'easy', 'empty', 'entire', 'equal', 'essential', 'exact', 'extra',
+    'fast', 'final', 'fine', 'fixed', 'flat', 'free', 'fresh', 'front',
+    'full', 'generic', 'given', 'good', 'great', 'green', 'hard',
+    'hidden', 'high', 'hot', 'huge', 'human', 'initial', 'inner',
+    'internal', 'invalid', 'large', 'late', 'latest', 'left', 'light',
+    'live', 'long', 'low', 'major', 'maximum', 'middle', 'minimum',
+    'minor', 'mixed', 'modern', 'multiple', 'native', 'natural',
+    'nested', 'neutral', 'new', 'normal', 'null', 'old', 'online',
+    'open', 'optional', 'outer', 'overall', 'parallel', 'partial',
+    'pending', 'plain', 'popular', 'possible', 'previous', 'primary',
+    'private', 'proper', 'protected', 'quick', 'random', 'raw', 'ready',
+    'real', 'recent', 'red', 'related', 'relative', 'remote', 'required',
+    'responsive', 'rich', 'right', 'round', 'safe', 'secure', 'selected',
+    'sensitive', 'separate', 'serial', 'shared', 'short', 'silent',
+    'similar', 'simple', 'single', 'small', 'smart', 'smooth', 'soft',
+    'solid', 'special', 'specific', 'stable', 'standard', 'static',
+    'strict', 'strong', 'supported', 'sweet', 'thin', 'tight', 'tiny',
+    'total', 'true', 'unique', 'universal', 'unknown', 'upper', 'valid',
+    'various', 'virtual', 'visible', 'visual', 'warm', 'weak', 'white',
+    'whole', 'wide', 'wild',
+    // Programming/tech terms
     'string', 'number', 'boolean', 'object', 'array', 'function', 'class',
     'type', 'error', 'null', 'undefined', 'true', 'false', 'return',
     'import', 'export', 'default', 'const', 'let', 'var', 'async', 'await',
     'try', 'catch', 'throw', 'finally', 'switch', 'case', 'break',
-    'note', 'example', 'warning', 'important', 'todo', 'fixme', 'hack',
-    'step', 'option', 'result', 'value', 'key', 'data', 'info',
-    'file', 'code', 'test', 'debug', 'config', 'setup', 'update',
-    // Common sentence starters that aren't names
+    'example', 'warning', 'important', 'todo', 'fixme', 'hack',
+    // Common sentence starters
     'please', 'thanks', 'hello', 'hi', 'hey', 'dear', 'sincerely',
-    'regards', 'best', 'cheers', 'sorry', 'yes', 'no', 'ok', 'okay',
-    // Days and months (not PPI)
+    'regards', 'best', 'cheers', 'sorry', 'yes', 'ok', 'okay',
+    // Days and months
     'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
     'january', 'february', 'march', 'april', 'may', 'june', 'july',
     'august', 'september', 'october', 'november', 'december',

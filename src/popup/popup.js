@@ -21,7 +21,7 @@ const $$ = (sel) => document.querySelectorAll(sel);
 // --- Safe innerHTML replacement (AMO-compliant) ---
 function safeHTML(el, html) {
   const doc = new DOMParser().parseFromString(html, 'text/html');
-  el.replaceChildren(...doc.body.childNodes);
+  el.replaceChildren(...Array.from(doc.body.childNodes));
 }
 
 // --- Init ---
@@ -208,11 +208,39 @@ async function initUnlockedUI() {
     });
   });
 
-  // Options link
+  // Options link (footer)
   $('#btnOptions').addEventListener('click', (e) => {
     e.preventDefault();
     api.runtime.openOptionsPage();
   });
+
+  // Options tab
+  $('#btnOpenFullOptions').addEventListener('click', () => {
+    api.runtime.openOptionsPage();
+  });
+
+  // Load options tab settings
+  $('#optSecretScanning').checked = settings.secretScanning !== false;
+  $('#optAutoDetect').checked = settings.autoDetect !== false;
+  $('#optAutoRedact').checked = settings.autoRedactDetected !== false;
+  $('#optHighlights').checked = settings.showHighlights || false;
+  $('#optDocPreview').checked = settings.docScanPreview !== false;
+
+  // Options tab change handlers
+  const optHandlers = [
+    ['optSecretScanning', 'secretScanning'],
+    ['optAutoDetect', 'autoDetect'],
+    ['optAutoRedact', 'autoRedactDetected'],
+    ['optHighlights', 'showHighlights'],
+    ['optDocPreview', 'docScanPreview'],
+  ];
+  for (const [id, key] of optHandlers) {
+    $(`#${id}`).addEventListener('change', async (e) => {
+      settings[key] = e.target.checked;
+      await Storage.saveSettings({ [key]: e.target.checked });
+      api.runtime.sendMessage({ type: 'update:settings', settings });
+    });
+  }
 
   // Update privacy note based on encryption state
   const encEnabled = await Storage._isAtRestEncryptionEnabled();

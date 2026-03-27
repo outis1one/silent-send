@@ -225,6 +225,7 @@ async function initUnlockedUI() {
   $('#optAutoRedact').checked = settings.autoRedactDetected !== false;
   $('#optHighlights').checked = settings.showHighlights || false;
   $('#optDocPreview').checked = settings.docScanPreview !== false;
+  $('#optProperNouns').checked = settings.detectProperNouns || false;
 
   // Options tab change handlers
   const optHandlers = [
@@ -233,6 +234,7 @@ async function initUnlockedUI() {
     ['optAutoRedact', 'autoRedactDetected'],
     ['optHighlights', 'showHighlights'],
     ['optDocPreview', 'docScanPreview'],
+    ['optProperNouns', 'detectProperNouns'],
   ];
   for (const [id, key] of optHandlers) {
     $(`#${id}`).addEventListener('change', async (e) => {

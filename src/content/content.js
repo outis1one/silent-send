@@ -604,9 +604,11 @@
     }
 
     // Proper noun heuristic — catch names, company names, project names
-    // that aren't configured in identity
-    const properNouns = detectProperNouns(text, configured);
-    findings.push(...properNouns);
+    // Disabled by default (too many false positives). Enable in Options.
+    if (settings.detectProperNouns) {
+      const properNouns = detectProperNouns(text, configured);
+      findings.push(...properNouns);
+    }
 
     // Deduplicate by value
     const seen = new Set();

@@ -136,7 +136,7 @@ const AutoDetect = {
    *
    * Returns array of { name, value, hint, category, index }
    */
-  scan(text, identity) {
+  scan(text, identity, options) {
     if (!text || text.length < 5) return [];
 
     const hasContext = CONTEXT_WORDS.test(text);
@@ -194,8 +194,11 @@ const AutoDetect = {
     }
 
     // Proper noun heuristic — catch names, company names, project names
-    const properNouns = this._detectProperNouns(text, configured);
-    findings.push(...properNouns);
+    // Disabled by default (too many false positives). Pass detectProperNouns: true to enable.
+    if (options?.detectProperNouns) {
+      const properNouns = this._detectProperNouns(text, configured);
+      findings.push(...properNouns);
+    }
 
     // Deduplicate overlapping matches
     findings.sort((a, b) => (a.index || 0) - (b.index || 0));

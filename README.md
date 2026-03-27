@@ -67,17 +67,13 @@ A browser extension (Chrome, Firefox, and Safari) that intercepts personal infor
 | `123-45-6789` | `[REDACTED-SSN]` |
 | `4111 1111 1111 1111` | `[REDACTED-CARD]` |
 
-### Proper noun detection (automatic)
+### Proper noun detection (opt-in)
 
-The auto-detect scanner also catches capitalized words mid-sentence that might be names, company names, or project names you forgot to configure. For example:
+The auto-detect scanner can optionally flag capitalized phrases that might be names, company names, or project names you forgot to configure. **Disabled by default** because it can produce false positives on normal phrases like "Getting Started" or "Generate Design".
 
-| You type | What happens |
-|----------|-------------|
-| `...talked to Sarah about the deploy` | Flags "Sarah" as a possible name |
-| `...the Acme Corp internal API` | Flags "Acme Corp" as a possible organization |
-| `...pushed to Project Atlas staging` | Flags "Project Atlas" as a possible project name |
+Enable it in the popup → Options tab → **Detect proper nouns**.
 
-These are flagged as warnings (not auto-redacted) so you can decide whether to add them as mappings. Common English words, programming terms, days, and months are excluded to reduce false positives.
+When enabled, phrases like "Acme Corp" or "Project Atlas" will be flagged as warnings so you can decide whether to add them as mappings. You can click "ignore" on any false positive to permanently dismiss it.
 
 ### Bulk import (speed up setup)
 

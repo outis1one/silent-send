@@ -603,7 +603,7 @@ function renderDomains() {
   const domains = settings.customDomains || [];
 
   if (domains.length === 0) {
-    safeHTML(list, '<div style="text-align:center;color:#9ca3af;padding:12px;font-size:13px">No custom domains. Built-in sites (Claude, ChatGPT, Grok, Gemini, localhost) are always active.</div>');
+    safeHTML(list, '<div style="text-align:center;color:#9ca3af;padding:12px;font-size:13px">No custom domains. Built-in sites (Claude, ChatGPT, Gemini, Grok, Perplexity, Copilot, DeepSeek, HuggingChat, Poe, GitHub, GitLab, Reddit, Stack Overflow, Pastebin, localhost) are always active.</div>');
     return;
   }
 

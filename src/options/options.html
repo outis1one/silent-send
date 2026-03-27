@@ -92,7 +92,7 @@
           <label>Max log entries</label>
           <p class="setting-desc">Number of activity log entries to keep</p>
         </div>
-        <input type="number" id="maxLogEntries" class="input-small" min="10" max="1000" value="200">
+        <input type="number" id="maxLogEntries" class="input-small" min="10" max="1000" value="100">
       </div>
     </section>
 
@@ -106,7 +106,7 @@
           <span>&#128274;</span> Sync Encryption
         </h3>
         <p class="section-desc" style="margin-bottom:10px">
-          Encrypt your sync data with a password, TOTP, or both. Authentication is only required when new data arrives and your cached key has expired.
+          Encryption is required for all sync channels. Set up a password (and optionally TOTP) before enabling any sync method. Authentication is only required when new data arrives and your cached key has expired.
         </p>
 
         <div id="syncEncryptionSetup">

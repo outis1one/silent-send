@@ -15,24 +15,6 @@
   if (window.__silentSendInjected) return;
   window.__silentSendInjected = true;
 
-  // Cross-browser API
-  const api =
-    typeof browser !== 'undefined' && browser.runtime
-      ? browser
-      : typeof chrome !== 'undefined'
-        ? chrome
-        : null;
-
-  // IMMEDIATELY inject the early fetch hook into the page world as an
-  // EXTERNAL file. Must be external (not inline) because sites like
-  // claude.ai have strict CSP that blocks inline scripts. Firefox
-  // enforces this strictly; Chrome is more permissive but external
-  // works everywhere.
-  const earlyHook = document.createElement('script');
-  earlyHook.src = api.runtime.getURL('src/content/early-hook.js');
-  (document.head || document.documentElement).appendChild(earlyHook);
-  earlyHook.onload = () => earlyHook.remove();
-
   // Merge active profiles into flat identity object
   function mergeProfiles(data) {
     const profiles = data?.profiles || [];
@@ -65,23 +47,57 @@
     return merged;
   }
 
+  // Cross-browser API
+  const api =
+    typeof browser !== 'undefined' && browser.runtime
+      ? browser
+      : typeof chrome !== 'undefined'
+        ? chrome
+        : null;
+
   // Load mappings and settings, then inject into page
   async function init() {
+    let mappings, identity, settings;
+
     const result = await api.storage.local.get(['ss_mappings', 'ss_identity', 'ss_settings']);
-    const settings = result.ss_settings || { enabled: true };
+    const isEncrypted = result.ss_mappings?._ssLocalEncrypted ||
+                        result.ss_identity?._ssLocalEncrypted;
 
-    // Check if data is encrypted (locked) — pass empty config
-    // The background will send decrypted data via vault:unlocked when ready
-    const isLocked = result.ss_mappings?._ssLocalEncrypted ||
-                     result.ss_identity?._ssLocalEncrypted;
-    const mappings = isLocked ? [] : (result.ss_mappings || []);
-    const identityData = isLocked ? {} : (result.ss_identity || {});
+    if (isEncrypted) {
+      // Data is encrypted — ask the background script for decrypted config.
+      // The background has access to the Storage module which can decrypt.
+      try {
+        const response = await api.runtime.sendMessage({ type: 'get:decrypted-config' });
+        if (response?.mappings) {
+          mappings = response.mappings;
+          identity = response.identity || {};
+          settings = response.settings || { enabled: true };
+        } else {
+          // Background couldn't decrypt (locked) — inject with empty config
+          // and wait for vault:unlocked message later
+          mappings = [];
+          identity = {};
+          settings = result.ss_settings || { enabled: true };
+        }
+      } catch {
+        mappings = [];
+        identity = {};
+        settings = result.ss_settings || { enabled: true };
+      }
+    } else {
+      // Data is plaintext — read directly
+      mappings = result.ss_mappings || [];
+      const identityData = result.ss_identity || {};
+      identity = mergeProfiles(identityData);
+      settings = result.ss_settings || { enabled: true };
+    }
 
-    // Merge active profiles into a flat identity object for the content script
-    const identity = mergeProfiles(identityData);
+    // Ensure identity is merged if it came from background
+    if (identity.profiles) {
+      identity = mergeProfiles(identity);
+    }
 
-    // Load the full content.js which will use __ssOriginalFetch
-    // (captured by the early hook above) and set __ssReady = true
+    // Inject the main interception script into the page's world
     const script = document.createElement('script');
     script.setAttribute('data-ss-config', JSON.stringify({ mappings, identity, settings }));
     script.src = api.runtime.getURL('src/content/content.js');

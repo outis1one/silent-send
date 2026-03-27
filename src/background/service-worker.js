@@ -201,6 +201,17 @@ const messageHandlers = {
     await setupAutoSyncAlarm();
   },
 
+  async 'get:decrypted-config'(_message, _sender, sendResponse) {
+    try {
+      const mappings = await Storage.getMappings();
+      const identity = await Storage.getIdentity();
+      const settings = await Storage.getSettings();
+      sendResponse({ mappings, identity, settings });
+    } catch {
+      sendResponse(null);
+    }
+  },
+
   async 'org:config-changed'() {
     await setupOrgPolicyAlarm();
   },

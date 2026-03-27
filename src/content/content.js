@@ -905,11 +905,8 @@
   // ============================================================
   // Fetch Interception — scans ALL POST requests with a body.
   // Service-agnostic: doesn't depend on URL patterns.
-  // Uses __ssOriginalFetch from the early hook (injected synchronously
-  // before any page JS) to ensure we have the real fetch, even if
-  // frameworks like Next.js (ChatGPT) store a reference early.
   // ============================================================
-  const originalFetch = window.__ssOriginalFetch || window.fetch;
+  const originalFetch = window.fetch;
 
   // URLs to never touch (static assets, analytics, etc.)
   const SKIP_URL_PATTERNS = [
@@ -1029,9 +1026,7 @@
     return originalFetch.call(this, url, options);
   };
 
-  // Register our fetch interceptor so the early hook proxy can use it
-  window.__ssInterceptFetch = window.fetch;
-  window.__ssReady = true;
+
 
   // ============================================================
   // Document Upload Processing
@@ -1397,8 +1392,8 @@
   // ============================================================
   // XMLHttpRequest Interception — same aggressive approach
   // ============================================================
-  const origOpen = window.__ssOriginalXHROpen || XMLHttpRequest.prototype.open;
-  const origSend = window.__ssOriginalXHRSend || XMLHttpRequest.prototype.send;
+  const origOpen = XMLHttpRequest.prototype.open;
+  const origSend = XMLHttpRequest.prototype.send;
 
   XMLHttpRequest.prototype.open = function (method, url, ...rest) {
     this._ssUrl = url;

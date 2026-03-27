@@ -70,7 +70,32 @@
     // Merge active profiles into a flat identity object for the content script
     const identity = mergeProfiles(identityData);
 
-    // Inject the main interception script into the page's world
+    // STEP 1: Inject a synchronous inline script that patches fetch/XHR
+    // IMMEDIATELY, before any page JS can store a reference to the originals.
+    // This thin proxy queues calls until the full content.js loads.
+    const earlyHook = document.createElement('script');
+    earlyHook.textContent = `(function(){
+      // Store the real fetch/XHR before any page script can
+      window.__ssOriginalFetch = window.fetch;
+      window.__ssOriginalXHROpen = XMLHttpRequest.prototype.open;
+      window.__ssOriginalXHRSend = XMLHttpRequest.prototype.send;
+      window.__ssReady = false;
+      window.__ssQueue = [];
+
+      // Replace fetch with a proxy that queues until content.js is ready
+      window.fetch = function() {
+        if (window.__ssReady && window.__ssInterceptFetch) {
+          return window.__ssInterceptFetch.apply(this, arguments);
+        }
+        // If not ready yet, call original (no substitution possible)
+        return window.__ssOriginalFetch.apply(this, arguments);
+      };
+    })();`;
+    (document.head || document.documentElement).appendChild(earlyHook);
+    earlyHook.remove();
+
+    // STEP 2: Load the full content.js which will use __ssOriginalFetch
+    // and set __ssReady = true when it's done hooking
     const script = document.createElement('script');
     script.setAttribute('data-ss-config', JSON.stringify({ mappings, identity, settings }));
     script.src = api.runtime.getURL('src/content/content.js');

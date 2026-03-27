@@ -1,6 +1,6 @@
 # Silent Send
 
-A browser extension (Chrome + Firefox) that intercepts personal information and substitutes it with user-defined replacements before sending to AI services.
+A browser extension (Chrome, Firefox, and Safari) that intercepts personal information and substitutes it with user-defined replacements before sending to AI services.
 
 ### Supported services
 
@@ -13,6 +13,8 @@ A browser extension (Chrome + Firefox) that intercepts personal information and 
 | OpenWebUI | localhost, 127.0.0.1, or custom domain | Untested |
 
 > **Note:** Only Claude has been tested so far. The other services have API interception patterns defined but may need adjustments. PRs welcome.
+>
+> **Browsers:** Chrome, Firefox (signed .xpi), and Safari (via Xcode project). All three use the same core code.
 
 ## How it works
 
@@ -39,6 +41,11 @@ A browser extension (Chrome + Firefox) that intercepts personal information and 
 | `(555) 123-4567` | `(555) 000-0000` |
 | `555.123.4567` | `(555) 000-0000` |
 | `macbook-pro` | `mycomputer` |
+| `JohnSmith` | `AlexDemo` |
+| `johnsmith` | `alexdemo` |
+| `john.smith` | `alex.demo` |
+| `john_smith` | `alex_demo` |
+| `smith-john` | `demo-alex` |
 
 ### Secret scanner (automatic, no configuration needed)
 
@@ -89,6 +96,23 @@ Import your existing data from password managers and browser autofill to pre-pop
 Passwords are imported as exact-match mappings (e.g. `MyS3cret!` → `[REDACTED-PASSWORD-1]`) so they get caught in any context — not just `password=value` patterns.
 
 Go to **Options** → **Transfer Data** → **Import CSV / Password Export**.
+
+### Document scanning
+
+When you upload files to an AI service, Silent Send extracts and scans the text for PPI before the file is sent:
+
+| Format | How it works |
+|---|---|
+| PDF | Text extracted from content streams, PPI substituted, uploaded as clean plaintext |
+| DOCX, XLSX, PPTX | XML text extracted from ZIP structure, PPI substituted, uploaded as plaintext |
+| ODT, ODS, ODP | OpenDocument XML text extracted, PPI substituted |
+| DOC, XLS | Legacy binary format — readable text runs extracted |
+| RTF | Formatting stripped, text extracted |
+| TXT, CSV, JSON, code files | Direct string substitution |
+| Images (PNG, JPG, etc.) | Not scanned — no text to extract |
+| Scanned PDFs (image-only) | Not scanned — no text layer |
+
+For PDF/DOCX/XLSX uploads, a preview panel shows what PPI was found before uploading. You can choose to substitute and upload, or upload the original. Text files are substituted silently. The original file on your disk is never modified — substitution only happens to the in-flight upload.
 
 ## First-time setup
 
@@ -142,11 +166,45 @@ Remap in Chrome: `chrome://extensions/shortcuts` | Firefox: `about:addons` → g
 
 ## How to verify it's working
 
-- **Badge count** on the extension icon shows substitutions per page
-- **Activity tab** in the popup shows a timestamped log of every substitution
-- **Test tab** in the popup lets you type text and see the before/after diff live
-- **Reveal mode** (eye icon or `Alt+Shift+R`) shows your real data in AI responses for easy copy/paste
-- **Browser DevTools** → Console shows `[Silent Send] Substituted N value(s)` messages
+1. **Test tab** — click the extension icon → Test tab. Type text containing your real data and see the substituted version live, highlighted in green. This is the quickest way to confirm your identity is configured correctly.
+
+2. **Badge count** — after sending a message, the extension icon shows a green number (e.g. "3") indicating how many substitutions were made. If you see a number, it's working.
+
+3. **Inspect the actual network request** — this is the definitive proof that your real data never reaches the AI. The steps vary slightly by browser:
+
+   **Firefox:**
+   1. Press F12 to open DevTools → click the **Network** tab
+   2. Send a message in the AI chat that contains your real data
+   3. In the network log, find the row with Method **POST** and File **events** (for Claude) or **conversation** (for ChatGPT)
+   4. Click that row
+   5. Click the **Request** tab in the right panel
+   6. Expand the JSON: look inside `events → 0 → message → content`
+   7. You should see your replaced data (e.g. "Ademo Demo"), **not** your real data (e.g. "John Smith")
+
+   **Chrome / Chromium / Edge:**
+   1. Press F12 to open DevTools → click the **Network** tab
+   2. Send a message in the AI chat that contains your real data
+   3. In the network log, find the row with Method **POST** and Name **chat** or **events** or **conversation**
+   4. Click that row
+   5. Click the **Payload** tab in the right panel
+   6. Expand the request body and look for the message content
+   7. You should see your replaced data, **not** your real data
+
+   **Safari:**
+   1. Safari → Settings → Advanced → check "Show features for web developers"
+   2. Press Cmd+Option+I to open Web Inspector → click the **Network** tab
+   3. Send a message in the AI chat that contains your real data
+   4. Find the POST request in the network log
+   5. Click it → click **Request** in the detail panel
+   6. You should see your replaced data, **not** your real data
+
+   If your real data appears anywhere in the request body, the substitution isn't working — check that the extension is enabled and your identity is configured.
+
+4. **Activity tab** — click the extension icon → Activity tab. Shows a timestamped log of every substitution with the original and replaced values.
+
+5. **Console log** — DevTools (F12) → Console shows `[Silent Send] Substituted N value(s) in <url>` for each intercepted request.
+
+6. **Reveal mode** — toggle with the eye icon or `Alt+Shift+R`. When on, the AI's responses display your real data instead of the replaced values. When off, you see what the AI actually received. If toggling changes the text, substitution is working.
 
 ## Installation
 
@@ -266,6 +324,40 @@ npm install && npm run run:firefox
 
 This opens Firefox with the extension pre-loaded. Resets when Firefox closes — useful for testing.
 
+### Safari (macOS)
+
+Safari extensions require an Xcode project wrapper. Apple provides a converter that does this automatically.
+
+#### Prerequisites
+
+- macOS with [Xcode](https://apps.apple.com/app/xcode/id497799835) installed (free from Mac App Store)
+- Xcode Command Line Tools: `xcode-select --install`
+- For App Store distribution: [Apple Developer account](https://developer.apple.com/) ($99/year)
+
+#### Build the Safari extension
+
+```bash
+git clone https://github.com/outis1one/silent-send.git
+cd silent-send
+npm install
+./build-safari.sh
+```
+
+This generates an Xcode project at `safari-build/`. Open it in Xcode:
+
+```bash
+open safari-build/Silent\ Send.xcodeproj
+```
+
+#### Test without an Apple Developer account
+
+1. Open the Xcode project
+2. Select **Product → Run** (Cmd+R) — this builds and launches Safari with the extension
+3. In Safari: **Settings → Extensions** → enable "Silent Send"
+4. If Safari says the extension is unsigned:
+   - Safari menu → **Settings → Advanced** → check "Show features for web developers"
+   - Safari menu → **Develop → Allow Unsigned Extensions** (you'll need to re-enable this every time Safari restarts)
+
 ## Custom domains (OpenWebUI, etc.)
 
 If you run OpenWebUI or another AI service on a custom domain (not localhost), go to **Options** → **Custom Domains** and add your domain (e.g. `https://ai.myserver.com`). The extension will activate on those domains too.
@@ -278,15 +370,17 @@ For Chrome, you'll need to also grant the extension permission to access the new
 manifest.json           — Chrome extension manifest (Manifest V3)
 manifest.firefox.json   — Firefox variant (adds gecko ID for signing)
 build.sh                — Copies the right manifest to dist/{chrome,firefox}/
+build-safari.sh         — Converts to Safari extension via Xcode project
+sign-firefox.sh         — Signs Firefox extension via Mozilla API
 src/
   background/
-    service-worker.js   — Badge management, logging coordination
+    service-worker.js   — Badge management, auto-sync alarms, org policy polling
   content/
     injector.js         — Content script (isolated world) — loads config, bridges messaging
-    content.js          — Page script (main world) — hooks fetch(), does substitution
-    content.css         — Visual indicators (highlights, reveals)
+    content.js          — Page script (main world) — hooks fetch(), does substitution, document scanning
+    content.css         — Visual indicators (highlights, reveals, document scan preview)
   popup/
-    popup.html/css/js   — Quick access: identity, mappings, activity, test mode
+    popup.html/css/js   — Quick access: identity, mappings, activity, test, options
   options/
     options.html/css/js — Full mapping management, import/export, settings, custom domains
   lib/
@@ -297,6 +391,7 @@ src/
     sync.js             — Cross-browser sync with encryption (browser sync, Gist, folder, URL, sync codes)
     storage.js          — Browser storage wrapper with transparent at-rest encryption
     auto-detect.js      — PPI pattern detection (IPs, addresses, paths, proper nouns)
+    document-scanner.js — PDF/DOCX/XLSX/ODT/RTF text extraction and scanning
     import-parser.js    — Bulk import from CSV, password managers, autofill exports
     version-history.js  — Sync version snapshots + rollback
     merge.js            — Three-way field-level merge for sync conflicts
@@ -431,41 +526,26 @@ These are standard browser management features — Silent Send does not attempt 
 
 Reveal mode only replaces values that were **actually substituted** in outbound messages during the current session. If the AI uses a word that happens to match one of your substitute values (e.g., the AI says "the user should..." and "user" is a configured substitute), it won't be falsely revealed as your real username.
 
+## What Silent Send can't catch
+
+Silent Send works well for text you type and most document uploads, but some things will get through:
+
+- **Images and screenshots** — can't scan pixels. A screenshot of your terminal with your username in it goes through unchanged.
+- **Scanned PDFs** — if the PDF is just an image with no text layer, there's nothing to substitute.
+- **Base64 and encoded data** — data embedded in encoded formats isn't detected.
+- **Names inside other words** — if your name is "Art", it won't catch "article" (word boundaries prevent most false positives, but edge cases exist).
+- **Data you haven't configured** — it can only substitute what you told it about, plus known secret formats. Your home address or employer name won't be caught unless you add them.
+- **Short names** — names under 3 characters are skipped for usernames/hostnames to avoid false positives.
+- **Custom secret formats** — the secret scanner knows common API key prefixes (sk-, ghp_, AKIA, etc.) but won't catch proprietary token formats your company uses.
+
+**Think of it like a spell checker for privacy** — it catches most things, but you should still glance at sensitive messages before sending.
+
 ## Disclaimer
 
-**Silent Send is not a battle-tested privacy application.** It is a convenience tool that reduces the chance of accidentally sharing personal information with AI services. It should not be relied upon as your sole privacy protection.
-
-**Estimated correctness: ~85-90%** for configured data. Things that can and will leak through:
-
-- **Images and screenshots** — Silent Send cannot scan pixels. If you paste a screenshot of a terminal with your real username in it, that goes through unchanged.
-- **File uploads** — PDFs, documents, and other file attachments are not scanned.
-- **Base64 and encoded data** — Data embedded in encoded formats is not detected.
-- **Names inside other words** — If your name is "Art", Silent Send may not catch "article" (it uses word boundaries, but edge cases exist).
-- **Unconfigured data** — It can only substitute what you told it about, plus known secret formats. Your home address, employer name, or project names won't be caught unless you add them as mappings.
-- **Short names** — Names under 3 characters are skipped for usernames/hostnames to avoid false positives.
-- **Non-standard secret formats** — The secret scanner knows common API key prefixes (sk-, ghp_, AKIA, etc.) but won't catch custom or proprietary token formats.
-
-**You should still review sensitive messages before sending.** Silent Send is a safety net, not a guarantee. Think of it like a spell checker for privacy — it catches most things, but you wouldn't send a legal document without proofreading.
-
-## Legal
-
-### Liability
-
-Silent Send is provided **"as is" without warranty of any kind**. The disclaimer section above explicitly documents known limitations. Users should not rely on Silent Send as their sole privacy protection.
-
-To mitigate litigation risk:
-- The extension clearly states it is a **convenience tool, not a security guarantee** in both the README and the popup footer
-- Known failure modes are documented (images, file uploads, encoded data, unconfigured data)
-- The "~85-90% correctness" estimate sets realistic expectations
-- No marketing claims of "complete protection" or "guaranteed privacy" are made
-- The BSL license includes standard liability limitation language
-
-This is comparable to how antivirus software, ad blockers, and password managers handle liability — they document limitations, disclaim warranties, and don't claim perfection. The key is to never overstate what the tool does.
-
-### Open source
-
-The source code is available under BSL 1.1. Contributions are welcome. If you find a bug, especially a privacy-related one, please report it.
+Silent Send is provided "as is" without warranty of any kind. It is a convenience tool that reduces the chance of accidentally sharing personal information with AI services. It is not a security guarantee and should not be your only privacy protection. The source code is available for inspection — you don't have to take our word for it.
 
 ## License
 
-[Business Source License 1.1](LICENSE) — free for personal, non-commercial use. Commercial use requires a paid license. The code automatically converts to MIT on March 26, 2030.
+[Business Source License 1.1](LICENSE) — free for personal, non-commercial use. Commercial use requires a paid license. The code converts to MIT on March 26, 2030.
+
+Contributions welcome. If you find a bug, especially a privacy-related one, please [open an issue](https://github.com/outis1one/silent-send/issues).

@@ -443,8 +443,6 @@
         });
       }
     }
-      }
-    }
 
     // Deduplicate
     const seen = new Set();

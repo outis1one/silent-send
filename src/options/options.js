@@ -1016,24 +1016,29 @@ async function initSyncEncryptionUI() {
       return;
     }
 
-    // Check if this is re-verification (key exists) or first-device (needs full auth)
-    const cached = await SilentSendCrypto.getCachedKey();
     let result;
-    if (cached) {
-      // Re-verification — password alone is enough
-      result = await SilentSendSync.reverifyWithPassword(password);
+
+    // If there's a pending sync import, use authenticateForSync
+    // (derives a temporary key with the source salt, doesn't touch local config)
+    if (window.__ssPendingSyncImport) {
+      result = await SilentSendSync.authenticateForSync(password);
     } else {
-      // First device — full auth with password + TOTP if configured
-      result = await SilentSendSync.authenticate(password, totpCode || undefined);
+      // Normal auth: check if re-verification or first-device
+      const cached = await SilentSendCrypto.getCachedKey();
+      if (cached) {
+        result = await SilentSendSync.reverifyWithPassword(password);
+      } else {
+        result = await SilentSendSync.authenticate(password, totpCode || undefined);
+      }
     }
 
     if (result.success) {
       $('#syncAuthPrompt').style.display = 'none';
       $('#syncAuthPassword').value = '';
       $('#syncAuthTOTPForPassword').value = '';
-      setSyncEncStatus(cached ? 'Re-verified with password.' : 'Authenticated. Sync data unlocked.', 'ok');
+      setSyncEncStatus('Authenticated.', 'ok');
 
-      // If there's a pending sync import, retry it now that auth succeeded
+      // If there's a pending sync import, retry it now
       if (window.__ssPendingSyncImport) {
         const retry = window.__ssPendingSyncImport;
         window.__ssPendingSyncImport = null;

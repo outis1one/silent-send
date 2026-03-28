@@ -49,17 +49,38 @@
       </div>
       <div class="setting-row">
         <div>
-          <label>Auto-redact secrets</label>
-          <p class="setting-desc">Automatically redact API keys, tokens, passwords, SSNs, credit card numbers</p>
+          <label>Auto Redact</label>
+          <p class="setting-desc">Automatically detect and redact API keys, tokens, passwords, SSNs, credit card numbers, and custom patterns</p>
         </div>
         <label class="toggle">
-          <input type="checkbox" id="secretScanning" checked>
+          <input type="checkbox" id="autoRedactToggle" checked>
           <span class="toggle-slider"></span>
         </label>
       </div>
+
+      <!-- Custom Secret Patterns -->
+      <div style="margin:12px 0;padding:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
+        <h3 style="font-size:13px;font-weight:600;margin:0 0 4px">Custom Redact Patterns</h3>
+        <p class="setting-desc" style="margin-bottom:8px">
+          Define your own patterns to catch proprietary tokens, internal URLs with keys, or any format the built-in scanner doesn't cover.
+        </p>
+        <div id="customRedactList"></div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <input type="text" id="newRedactName" placeholder="Name (e.g. ControlD Token)" style="flex:1;min-width:140px;font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px">
+            <input type="text" id="newRedactPattern" placeholder="Regex or prefix (e.g. ctrl_[A-Za-z0-9]{20,})" style="flex:2;min-width:200px;font-size:12px;font-family:monospace;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px">
+          </div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input type="text" id="newRedactReplacement" placeholder="Replacement (default: [REDACTED-NAME])" style="flex:1;font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px">
+            <button class="btn btn-primary btn-sm" id="btnAddRedactPattern">Add Pattern</button>
+          </div>
+        </div>
+        <p class="setting-desc" style="margin-top:6px;margin-bottom:0">
+          <strong>Tip:</strong> For a URL like <code>https://dns.example.com/abc123</code>, use a pattern like <code>dns\.example\.com/[A-Za-z0-9;]+</code> to match the secret path segment.
+        </p>
+      </div>
+
       <div class="setting-row">
-        <div>
-          <label>Auto-detect unconfigured PPI</label>
           <p class="setting-desc">Warn when potential personal data (IPs, addresses, paths) is detected that you haven't configured</p>
         </div>
         <label class="toggle">
@@ -69,8 +90,8 @@
       </div>
       <div class="setting-row">
         <div>
-          <label>Auto-redact detected PPI on send</label>
-          <p class="setting-desc">Automatically replace detected PPI with generic placeholders (192.0.2.1, 123 Example Street, etc.) when sending</p>
+          <label>Auto-redact detected PII on send</label>
+          <p class="setting-desc">Automatically replace detected PII with generic placeholders (192.0.2.1, 123 Example Street, etc.) when sending</p>
         </div>
         <label class="toggle">
           <input type="checkbox" id="autoRedactDetected" checked>
@@ -79,8 +100,8 @@
       </div>
       <div class="setting-row">
         <div>
-          <label>Offer to auto-add detected PPI</label>
-          <p class="setting-desc">Show a + button on detected PPI to instantly create a mapping with a suggested fake value</p>
+          <label>Offer to auto-add detected PII</label>
+          <p class="setting-desc">Show a + button on detected PII to instantly create a mapping with a suggested fake value</p>
         </div>
         <label class="toggle">
           <input type="checkbox" id="autoAddDetected" checked>
@@ -611,6 +632,13 @@
 
     <footer>
       <p>Silent Send v0.9.0</p>
+      <p style="font-size:11px;color:#9ca3af;margin-top:6px;max-width:600px">
+        Silent Send is a convenience tool, not a security guarantee. Third-party sites may change how they send data at any time, which can cause missed substitutions without warning. You are responsible for verifying your data before sending. See the <a href="https://github.com/outis1one/silent-send/blob/main/LICENSE" target="_blank" style="color:#6b7280">LICENSE</a> for full terms.
+      </p>
+      <p style="font-size:11px;color:#9ca3af;margin-top:8px">
+        Find Silent Send useful? No obligation, but if you'd like to help keep it going:
+        <a href="https://ko-fi.com/YOUR_KOFI_USERNAME" target="_blank" style="color:#6b7280">Buy me a coffee</a>
+      </p>
     </footer>
   </div>
 

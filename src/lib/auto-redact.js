@@ -1,10 +1,12 @@
 /**
- * Silent Send - Secret Scanner
+ * Silent Send - Auto Redact
  *
  * Detects common secret/credential patterns in text and either
  * warns or auto-redacts them. This catches things the identity-based
  * smart patterns can't: API keys, tokens, passwords, SSNs, credit
  * cards, private keys, connection strings, etc.
+ *
+ * Supports user-defined custom patterns for proprietary token formats.
  *
  * Each pattern has:
  *   - name: human-readable label
@@ -13,7 +15,7 @@
  *   - severity: 'critical' (always redact) or 'warning' (flag but allow)
  */
 
-const SECRET_PATTERNS = [
+const REDACT_PATTERNS = [
   // --- API Keys ---
   {
     name: 'OpenAI API Key',
@@ -161,14 +163,39 @@ const SECRET_PATTERNS = [
   },
 ];
 
-const SecretScanner = {
+const AutoRedact = {
+  /**
+   * Build the full pattern list (built-in + custom).
+   * Custom patterns come from settings.customRedactPatterns.
+   */
+  _buildPatterns(customPatterns) {
+    const all = [...REDACT_PATTERNS];
+    if (Array.isArray(customPatterns)) {
+      for (const cp of customPatterns) {
+        if (!cp.enabled || !cp.pattern) continue;
+        try {
+          all.push({
+            name: cp.name || 'Custom Pattern',
+            regex: new RegExp(cp.pattern, 'g'),
+            redact: cp.redact || '[REDACTED-CUSTOM]',
+            severity: 'critical',
+          });
+        } catch { /* invalid regex — skip */ }
+      }
+    }
+    return all;
+  },
+
   /**
    * Scan text for secrets. Returns list of findings.
+   * @param {string} text
+   * @param {Array} [customPatterns] — from settings.customRedactPatterns
    */
-  scan(text) {
+  scan(text, customPatterns) {
     const findings = [];
+    const patterns = this._buildPatterns(customPatterns);
 
-    for (const pattern of SECRET_PATTERNS) {
+    for (const pattern of patterns) {
       // Reset regex lastIndex
       pattern.regex.lastIndex = 0;
       let match;
@@ -204,9 +231,11 @@ const SecretScanner = {
   /**
    * Redact all critical secrets in text. Warnings are not auto-redacted.
    * Returns { text, redactions[] }
+   * @param {string} text
+   * @param {Array} [customPatterns] — from settings.customRedactPatterns
    */
-  redact(text) {
-    const findings = this.scan(text);
+  redact(text, customPatterns) {
+    const findings = this.scan(text, customPatterns);
     const redactions = [];
     let result = text;
 
@@ -220,7 +249,7 @@ const SecretScanner = {
       redactions.push({
         original: f.value,
         replaced: f.redactTo,
-        category: 'secret',
+        category: 'redact',
         pattern: f.name,
       });
     }
@@ -237,7 +266,7 @@ const SecretScanner = {
 };
 
 if (typeof globalThis !== 'undefined') {
-  globalThis.SecretScanner = SecretScanner;
+  globalThis.AutoRedact = AutoRedact;
 }
 
-export default SecretScanner;
+export default AutoRedact;

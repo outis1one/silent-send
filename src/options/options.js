@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Apply settings to UI
   $('#showHighlights').checked = settings.showHighlights || false;
-  $('#secretScanning').checked = settings.secretScanning !== false;
+  $('#autoRedactToggle').checked = settings.autoRedact !== false;
   $('#autoDetect').checked = settings.autoDetect !== false;
   $('#autoRedactDetected').checked = settings.autoRedactDetected !== false;
   $('#autoAddDetected').checked = settings.autoAddDetected !== false;
@@ -299,8 +299,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     await Storage.saveSettings({ showHighlights: e.target.checked });
   });
 
-  $('#secretScanning').addEventListener('change', async (e) => {
-    await Storage.saveSettings({ secretScanning: e.target.checked });
+  $('#autoRedactToggle').addEventListener('change', async (e) => {
+    await Storage.saveSettings({ autoRedact: e.target.checked });
+  });
+
+  // Custom redact patterns
+  renderCustomRedactPatterns();
+  $('#btnAddRedactPattern').addEventListener('click', addCustomRedactPattern);
+  $('#newRedactPattern').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') addCustomRedactPattern();
   });
 
   $('#autoDetect').addEventListener('change', async (e) => {
@@ -800,6 +807,90 @@ function renderDomains() {
 
       renderDomains();
       renderSuggestedDomains();
+    });
+  });
+}
+
+// --- Custom Redact Patterns ---
+
+function addCustomRedactPattern() {
+  const name = $('#newRedactName').value.trim();
+  const pattern = $('#newRedactPattern').value.trim();
+  const redact = $('#newRedactReplacement').value.trim();
+
+  if (!pattern) { alert('Pattern is required.'); return; }
+
+  // Validate regex
+  try {
+    new RegExp(pattern, 'g');
+  } catch (e) {
+    alert('Invalid regex: ' + e.message);
+    return;
+  }
+
+  const label = name || 'Custom Pattern';
+  const replacement = redact || `[REDACTED-${label.toUpperCase().replace(/\s+/g, '-')}]`;
+
+  const patterns = settings.customRedactPatterns || [];
+  patterns.push({
+    id: crypto.randomUUID(),
+    name: label,
+    pattern,
+    redact: replacement,
+    enabled: true,
+  });
+
+  settings.customRedactPatterns = patterns;
+  Storage.saveSettings({ customRedactPatterns: patterns });
+  renderCustomRedactPatterns();
+
+  $('#newRedactName').value = '';
+  $('#newRedactPattern').value = '';
+  $('#newRedactReplacement').value = '';
+}
+
+function renderCustomRedactPatterns() {
+  const list = $('#customRedactList');
+  if (!list) return;
+  const patterns = settings.customRedactPatterns || [];
+
+  if (patterns.length === 0) {
+    safeHTML(list, '<div style="font-size:12px;color:#9ca3af;padding:6px 0">No custom patterns defined. Built-in patterns cover common API keys, tokens, and credentials.</div>');
+    return;
+  }
+
+  safeHTML(list, patterns.map((p, i) => `
+    <div style="display:flex;align-items:center;gap:6px;padding:6px 8px;background:#fff;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:4px;flex-wrap:wrap">
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;min-width:0">
+        <input type="checkbox" class="redact-toggle" data-index="${i}" ${p.enabled ? 'checked' : ''}>
+      </label>
+      <span style="font-size:12px;font-weight:500;white-space:nowrap">${escapeHtml(p.name)}</span>
+      <code style="font-size:11px;color:#6b7280;background:#f3f4f6;padding:1px 5px;border-radius:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:250px" title="${escapeHtml(p.pattern)}">${escapeHtml(p.pattern)}</code>
+      <span style="font-size:11px;color:#9ca3af;margin-left:auto;white-space:nowrap">&rarr; ${escapeHtml(p.redact)}</span>
+      <button class="btn btn-sm btn-danger btn-remove-redact" data-index="${i}" style="padding:2px 6px">&times;</button>
+    </div>
+  `).join(''));
+
+  // Toggle handlers
+  list.querySelectorAll('.redact-toggle').forEach(toggle => {
+    toggle.addEventListener('change', async () => {
+      const idx = parseInt(toggle.dataset.index, 10);
+      const patterns = settings.customRedactPatterns || [];
+      patterns[idx].enabled = toggle.checked;
+      settings.customRedactPatterns = patterns;
+      await Storage.saveSettings({ customRedactPatterns: patterns });
+    });
+  });
+
+  // Remove handlers
+  list.querySelectorAll('.btn-remove-redact').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const idx = parseInt(btn.dataset.index, 10);
+      const patterns = settings.customRedactPatterns || [];
+      patterns.splice(idx, 1);
+      settings.customRedactPatterns = patterns;
+      await Storage.saveSettings({ customRedactPatterns: patterns });
+      renderCustomRedactPatterns();
     });
   });
 }

@@ -62,6 +62,17 @@ If this privacy policy changes, the updated version will be posted at this URL a
 
 For questions about this privacy policy, open an issue at: https://github.com/outis1one/silent-send/issues
 
+## Limitations and disclaimer
+
+Silent Send is a convenience tool that reduces the risk of sharing personal information with third-party services. It does not guarantee complete protection. Specifically:
+
+- **Third-party changes:** Websites may change their APIs, interfaces, or data submission methods at any time. Such changes can cause Silent Send to stop intercepting or substituting data without any visible error. Silent Send contributors have no control over third-party websites and accept no responsibility for changes they make.
+- **Coverage gaps:** Silent Send may not detect personal information in images, unusual text formats, non-standard encodings, dynamically generated content, or patterns not covered by built-in or custom rules.
+- **User responsibility:** You are responsible for verifying that substitutions are applied correctly before transmitting sensitive data. The extension provides a Test tab for this purpose.
+- **Not a compliance tool:** Silent Send does not guarantee compliance with any privacy regulation (GDPR, HIPAA, CCPA, PCI-DSS, or otherwise). Organizations requiring regulatory compliance should implement appropriate professional tooling and processes.
+
+For the full limitation of liability, see the [LICENSE](LICENSE) file.
+
 ## Open source
 
 Silent Send's source code is publicly available at https://github.com/outis1one/silent-send — you can verify every claim in this policy by reading the code.

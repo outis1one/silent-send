@@ -29,8 +29,8 @@
     Load this page as an extension page (or inject via dev console on the Options page).<br>
     Tests exercise sync, encryption, storage, auto-redact, and domain management.
   </p>
-  <button class="primary" onclick="runAllTests()">Run All Tests</button>
-  <button onclick="document.getElementById('results').innerHTML=''">Clear</button>
+  <button class="primary" id="btnRunTests">Run All Tests</button>
+  <button id="btnClear">Clear</button>
   <div id="results" style="margin-top:16px"></div>
   <div id="summary"></div>
 
@@ -485,7 +485,8 @@
       // RUN ALL
       // ============================================================
 
-      window.runAllTests = async function() {
+      async function runAllTests() {
+        document.getElementById('results').innerHTML = '<p style="color:#6b7280">Running tests...</p>';
         const outcomes = [];
         for (const t of results) {
           try {
@@ -497,10 +498,18 @@
           }
         }
         renderResults(outcomes);
-      };
+      }
 
-      // Auto-register tests on load
+      // Wire up buttons (CSP blocks inline onclick)
+      document.getElementById('btnRunTests').addEventListener('click', runAllTests);
+      document.getElementById('btnClear').addEventListener('click', () => {
+        document.getElementById('results').innerHTML = '';
+        document.getElementById('summary').textContent = '';
+      });
+
+      // Show ready state
       console.log(`[Silent Send Tests] ${results.length} tests registered. Click "Run All Tests" to start.`);
+      document.getElementById('results').innerHTML = `<p style="color:#6b7280">${results.length} tests loaded. Click "Run All Tests" to start.</p>`;
     </script>
 </body>
 </html>

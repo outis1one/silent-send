@@ -23,7 +23,7 @@ const KEYS = {
   SETTINGS: 'ss_settings',
 };
 
-// Keys that contain sensitive PPI and should be encrypted at rest
+// Keys that contain sensitive PII and should be encrypted at rest
 // All user data keys are encrypted at rest — settings included since
 // custom domains and configuration can reveal what services the user
 // accesses. Only ss_sync_encryption (salt, verification blob) and
@@ -34,12 +34,13 @@ const DEFAULT_SETTINGS = {
   enabled: true,
   showHighlights: false,
   revealMode: false,
-  secretScanning: true,
+  autoRedact: true,
   autoDetect: true,
   autoRedactDetected: true,
   autoAddDetected: true,
   maxLogEntries: 100,
   customDomains: [],
+  customRedactPatterns: [],
   categories: ['name', 'email', 'phone', 'address', 'ssn', 'dob', 'domain', 'password', 'general'],
   browserSync: false,
 };

@@ -1,16 +1,22 @@
 #!/bin/bash
 #
-# Version Bump Script
+# Version Bump Script — works with any project
 #
-# Finds all version numbers in the project, shows them, and lets you
-# bump the patch/minor/major or enter a custom version.
+# Finds version strings in any file format and updates them together.
 #
-# Works with any project that has version strings in JSON files,
-# HTML files, or other text files.
+# Supported patterns:
+#   JSON:       "version": "1.2.3"
+#   TOML:       version = "1.2.3"
+#   YAML:       version: 1.2.3
+#   Python:     __version__ = "1.2.3"  or  version = "1.2.3"
+#   PHP:        Version: 1.2.3  (WordPress plugin/theme headers)
+#   Shell:      VERSION="1.2.3"
+#   HTML/JS:    v1.2.3
+#   setup.cfg:  version = 1.2.3
 #
 # Usage:
-#   ./bump-version.sh          # interactive — shows versions, asks what to do
-#   ./bump-version.sh 1.2.3    # set all versions to 1.2.3
+#   ./bump-version.sh          # interactive
+#   ./bump-version.sh 1.2.3    # set all to 1.2.3
 #   ./bump-version.sh patch    # bump patch: 0.9.0 → 0.9.1
 #   ./bump-version.sh minor    # bump minor: 0.9.0 → 0.10.0
 #   ./bump-version.sh major    # bump major: 0.9.0 → 1.0.0
@@ -26,53 +32,88 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 RED='\033[0;31m'
-NC='\033[0m' # No Color
+DIM='\033[2m'
+NC='\033[0m'
 
-# Find all files containing version-like strings
-# Looks for patterns like "version": "X.Y.Z" or "v X.Y.Z" or "Version X.Y.Z"
+# Directories to skip
+SKIP_DIRS="node_modules|dist|build|\.git|__pycache__|\.venv|venv|\.egg-info|vendor"
+
+# File extensions to search
+SEARCH_EXTS="json|toml|yaml|yml|py|php|sh|bash|html|js|css|cfg|ini|txt|md|xml|plist|gradle|gemspec|podspec|csproj|props"
+
+# Find all files that might contain version strings
 find_version_files() {
-  # JSON files with "version": "X.Y.Z"
-  grep -rlE '"version":\s*"[0-9]+\.[0-9]+\.[0-9]+"' --include='*.json' . 2>/dev/null | grep -v node_modules | grep -v dist || true
-  # HTML/JS files with version display strings like "v1.2.3" or "v 1.2.3"
-  grep -rlE ' v[0-9]+\.[0-9]+\.[0-9]+' --include='*.html' --include='*.js' . 2>/dev/null | grep -v node_modules | grep -v dist || true
+  local files=""
+
+  # Use find + grep for maximum compatibility
+  while IFS= read -r file; do
+    [ -z "$file" ] && continue
+    # Skip binary files and large files
+    [ ! -f "$file" ] && continue
+    local size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null || echo 0)
+    [ "$size" -gt 500000 ] && continue
+
+    files="$files
+$file"
+  done < <(find . -type f \( \
+    -name "*.json" -o -name "*.toml" -o -name "*.yaml" -o -name "*.yml" \
+    -o -name "*.py" -o -name "*.php" -o -name "*.sh" -o -name "*.bash" \
+    -o -name "*.html" -o -name "*.js" -o -name "*.css" -o -name "*.cfg" \
+    -o -name "*.ini" -o -name "*.txt" -o -name "*.xml" -o -name "*.plist" \
+    -o -name "*.gradle" -o -name "*.gemspec" -o -name "*.podspec" \
+    -o -name "*.csproj" -o -name "*.props" -o -name "*.md" \
+    -o -name "Makefile" -o -name "Dockerfile" -o -name "Cargo.toml" \
+    -o -name "setup.py" -o -name "setup.cfg" -o -name "pyproject.toml" \
+    -o -name "package.json" -o -name "composer.json" -o -name "Gemfile" \
+    \) 2>/dev/null | grep -Ev "$SKIP_DIRS" | grep -v "bump-version")
+
+  echo "$files"
 }
 
-# Extract version from a file
+# Extract version from a file — tries all known patterns
 get_version_from_file() {
   local file="$1"
-  # Try JSON "version": "X.Y.Z" first
-  local ver=$(grep -oP '"version":\s*"\K[0-9]+\.[0-9]+\.[0-9]+' "$file" 2>/dev/null | head -1)
-  if [ -n "$ver" ]; then
-    echo "$ver"
-    return
-  fi
-  # Try "vX.Y.Z" or "Version X.Y.Z" pattern
-  ver=$(grep -oP '[vV]ersion[" ]*\K[0-9]+\.[0-9]+\.[0-9]+' "$file" 2>/dev/null | head -1)
-  if [ -n "$ver" ]; then
-    echo "$ver"
-    return
-  fi
-  # Try " vX.Y.Z" (e.g. "Silent Send v0.9.0")
-  ver=$(grep -oP ' v\K[0-9]+\.[0-9]+\.[0-9]+' "$file" 2>/dev/null | head -1)
-  if [ -n "$ver" ]; then
-    echo "$ver"
-    return
-  fi
+  local ver=""
+
+  # JSON: "version": "X.Y.Z"
+  ver=$(grep -oP '"version"\s*:\s*"\K[0-9]+\.[0-9]+\.[0-9]+' "$file" 2>/dev/null | head -1)
+  [ -n "$ver" ] && echo "$ver" && return
+
+  # TOML/Python: version = "X.Y.Z" or __version__ = "X.Y.Z"
+  ver=$(grep -oP '(?:__)?version\s*=\s*["\x27]\K[0-9]+\.[0-9]+\.[0-9]+' "$file" 2>/dev/null | head -1)
+  [ -n "$ver" ] && echo "$ver" && return
+
+  # YAML: version: X.Y.Z or version: "X.Y.Z"
+  ver=$(grep -oP '^version:\s*["\x27]?\K[0-9]+\.[0-9]+\.[0-9]+' "$file" 2>/dev/null | head -1)
+  [ -n "$ver" ] && echo "$ver" && return
+
+  # PHP/WordPress: Version: X.Y.Z (in comment header)
+  ver=$(grep -oP 'Version:\s*\K[0-9]+\.[0-9]+\.[0-9]+' "$file" 2>/dev/null | head -1)
+  [ -n "$ver" ] && echo "$ver" && return
+
+  # Shell: VERSION="X.Y.Z" or VERSION='X.Y.Z'
+  ver=$(grep -oP 'VERSION\s*=\s*["\x27]?\K[0-9]+\.[0-9]+\.[0-9]+' "$file" 2>/dev/null | head -1)
+  [ -n "$ver" ] && echo "$ver" && return
+
+  # HTML/display: " vX.Y.Z" or ">vX.Y.Z"
+  ver=$(grep -oP '[ >]v\K[0-9]+\.[0-9]+\.[0-9]+' "$file" 2>/dev/null | head -1)
+  [ -n "$ver" ] && echo "$ver" && return
+
+  # XML/plist: <string>X.Y.Z</string> near version key
+  ver=$(grep -A1 -i 'version' "$file" 2>/dev/null | grep -oP '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  [ -n "$ver" ] && echo "$ver" && return
 }
 
-# Get the most common version across all files (the "current" version)
+# Get the most common version (the "current" version)
 get_current_version() {
   local versions=""
   while IFS= read -r file; do
     [ -z "$file" ] && continue
     local ver=$(get_version_from_file "$file")
-    if [ -n "$ver" ]; then
-      versions="$versions $ver"
-    fi
+    [ -n "$ver" ] && versions="$versions $ver"
   done <<< "$(find_version_files)"
 
-  # Return the most common version
-  echo "$versions" | tr ' ' '\n' | sort | uniq -c | sort -rn | head -1 | awk '{print $2}'
+  echo "$versions" | tr ' ' '\n' | grep -v '^$' | sort | uniq -c | sort -rn | head -1 | awk '{print $2}'
 }
 
 # Show all version occurrences
@@ -94,6 +135,7 @@ show_versions() {
 replace_version() {
   local old="$1"
   local new="$2"
+  local escaped_old=$(echo "$old" | sed 's/\./\\./g')
 
   echo -e "${YELLOW}Replacing $old → $new${NC}"
   echo ""
@@ -102,12 +144,19 @@ replace_version() {
     [ -z "$file" ] && continue
     local ver=$(get_version_from_file "$file")
     if [ "$ver" = "$old" ]; then
-      # Replace in JSON files: "version": "X.Y.Z"
-      sed -i "s/\"version\": \"$old\"/\"version\": \"$new\"/" "$file" 2>/dev/null
-      # Replace display strings: vX.Y.Z or Version X.Y.Z
-      sed -i "s/\(ersion[\" ]*\)$old/\1$new/g" "$file" 2>/dev/null
-      # Replace vX.Y.Z standalone
-      sed -i "s/v$old/v$new/g" "$file" 2>/dev/null
+      # Replace all known version patterns
+      # JSON: "version": "X.Y.Z"
+      sed -i "s/\(\"version\"\s*:\s*\"\)$escaped_old\"/\1$new\"/g" "$file" 2>/dev/null
+      # TOML/Python: version = "X.Y.Z" or __version__ = "X.Y.Z"
+      sed -i "s/\(\(__\)\?version\s*=\s*[\"']\)$escaped_old/\1$new/g" "$file" 2>/dev/null
+      # YAML: version: X.Y.Z
+      sed -i "s/\(^version:\s*[\"']\?\)$escaped_old/\1$new/g" "$file" 2>/dev/null
+      # PHP/WordPress: Version: X.Y.Z
+      sed -i "s/\(Version:\s*\)$escaped_old/\1$new/g" "$file" 2>/dev/null
+      # Shell: VERSION="X.Y.Z"
+      sed -i "s/\(VERSION\s*=\s*[\"']\?\)$escaped_old/\1$new/g" "$file" 2>/dev/null
+      # HTML display: vX.Y.Z
+      sed -i "s/\([ >]v\)$escaped_old/\1$new/g" "$file" 2>/dev/null
 
       local rel="${file#./}"
       echo -e "  ${GREEN}✓${NC} $rel"
@@ -122,9 +171,7 @@ replace_version() {
 bump_version() {
   local ver="$1"
   local part="$2"
-
   IFS='.' read -r major minor patch <<< "$ver"
-
   case "$part" in
     major) echo "$((major + 1)).0.0" ;;
     minor) echo "$major.$((minor + 1)).0" ;;

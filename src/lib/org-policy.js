@@ -202,7 +202,7 @@ const OrgPolicy = {
    *
    * @returns {Array} additional patterns to add to auto-redact
    */
-  async getOrgSecretPatterns() {
+  async getOrgRedactPatterns() {
     const policy = await this.getPolicy();
     if (!policy?.requiredSecretPatterns?.length) return [];
 

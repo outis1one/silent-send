@@ -53,26 +53,26 @@
           <p class="setting-desc">Automatically detect and redact API keys, tokens, passwords, SSNs, credit card numbers, and custom patterns</p>
         </div>
         <label class="toggle">
-          <input type="checkbox" id="secretScanning" checked>
+          <input type="checkbox" id="autoRedactToggle" checked>
           <span class="toggle-slider"></span>
         </label>
       </div>
 
       <!-- Custom Secret Patterns -->
       <div style="margin:12px 0;padding:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
-        <h3 style="font-size:13px;font-weight:600;margin:0 0 4px">Custom Secret Patterns</h3>
+        <h3 style="font-size:13px;font-weight:600;margin:0 0 4px">Custom Redact Patterns</h3>
         <p class="setting-desc" style="margin-bottom:8px">
           Define your own patterns to catch proprietary tokens, internal URLs with keys, or any format the built-in scanner doesn't cover.
         </p>
-        <div id="customSecretList"></div>
+        <div id="customRedactList"></div>
         <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
           <div style="display:flex;gap:6px;flex-wrap:wrap">
-            <input type="text" id="newSecretName" placeholder="Name (e.g. ControlD Token)" style="flex:1;min-width:140px;font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px">
-            <input type="text" id="newSecretPattern" placeholder="Regex or prefix (e.g. ctrl_[A-Za-z0-9]{20,})" style="flex:2;min-width:200px;font-size:12px;font-family:monospace;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px">
+            <input type="text" id="newRedactName" placeholder="Name (e.g. ControlD Token)" style="flex:1;min-width:140px;font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px">
+            <input type="text" id="newRedactPattern" placeholder="Regex or prefix (e.g. ctrl_[A-Za-z0-9]{20,})" style="flex:2;min-width:200px;font-size:12px;font-family:monospace;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px">
           </div>
           <div style="display:flex;gap:6px;align-items:center">
-            <input type="text" id="newSecretRedact" placeholder="Replacement (default: [REDACTED-NAME])" style="flex:1;font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px">
-            <button class="btn btn-primary btn-sm" id="btnAddSecretPattern">Add Pattern</button>
+            <input type="text" id="newRedactReplacement" placeholder="Replacement (default: [REDACTED-NAME])" style="flex:1;font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px">
+            <button class="btn btn-primary btn-sm" id="btnAddRedactPattern">Add Pattern</button>
           </div>
         </div>
         <p class="setting-desc" style="margin-top:6px;margin-bottom:0">

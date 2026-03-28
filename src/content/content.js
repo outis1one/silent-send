@@ -287,7 +287,7 @@
   }
 
   // ============================================================
-  // Combined substitution: smart patterns + explicit + secret scan
+  // Combined substitution: smart patterns + explicit + auto-redact
   // + auto-detect warning for unconfigured PPI
   // ============================================================
   function substituteAll(text) {
@@ -303,10 +303,10 @@
 
     // 3. Auto Redact (API keys, tokens, SSNs, credit cards, custom patterns, etc.)
     let finalText = explicit.text;
-    if (settings.secretScanning !== false) {
-      const secrets = scanAndRedactSecrets(finalText);
-      allReplacements.push(...secrets.redactions);
-      finalText = secrets.text;
+    if (settings.autoRedact !== false) {
+      const redacted = runAutoRedact(finalText);
+      allReplacements.push(...redacted.redactions);
+      finalText = redacted.text;
     }
 
     // 4. Auto-detect: scan the FINAL text for unconfigured PPI
@@ -665,11 +665,11 @@
   }
 
   // ============================================================
-  // Auto Redact — Secret Scanner (inline for page world)
+  // Auto Redact (inline for page world)
   // Detects API keys, tokens, passwords, SSNs, credit cards,
   // plus user-defined custom patterns from settings.
   // ============================================================
-  const SECRET_PATTERNS = [
+  const REDACT_PATTERNS = [
     // OpenAI
     { name: 'OpenAI Key', re: /\bsk-[A-Za-z0-9]{20,}\b/g, to: '[REDACTED-OPENAI-KEY]' },
     { name: 'OpenAI Project Key', re: /\bsk-proj-[A-Za-z0-9_-]{20,}\b/g, to: '[REDACTED-OPENAI-KEY]' },
@@ -707,13 +707,13 @@
     { name: 'Credit Card', re: /\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b/g, to: '[REDACTED-CARD]' },
   ];
 
-  function scanAndRedactSecrets(text) {
+  function runAutoRedact(text) {
     const redactions = [];
     let result = text;
 
     // Combine built-in + custom patterns
-    const allPatterns = [...SECRET_PATTERNS];
-    const custom = settings.customSecretPatterns || [];
+    const allPatterns = [...REDACT_PATTERNS];
+    const custom = settings.customRedactPatterns || [];
     for (const cp of custom) {
       if (!cp.enabled || !cp.pattern) continue;
       try {
@@ -739,7 +739,7 @@
         redactions.push({
           original: match.value.slice(0, 8) + '...',  // Don't log the full secret
           replaced: replacement,
-          category: 'secret',
+          category: 'redact',
           pattern: pat.name,
         });
         result =
@@ -1437,7 +1437,7 @@
       }
     }
 
-    // Also add auto-detect and secret scanner substitutions from this session
+    // Also add auto-detect and auto-redact substitutions from this session
     for (const [key, entry] of sessionSubstitutions) {
       if (!pairs.some(p => p.from.toLowerCase() === key)) {
         pairs.push({ from: entry.replaced, to: entry.original });

@@ -1,6 +1,6 @@
 import SubstitutionEngine from '../lib/substitution-engine.js';
 import SmartPatterns from '../lib/smart-patterns.js';
-import SecretScanner from '../lib/secret-scanner.js';
+import AutoRedact from '../lib/auto-redact.js';
 import AutoDetect from '../lib/auto-detect.js';
 import Storage from '../lib/storage.js';
 import SilentSendSync from '../lib/sync.js';
@@ -220,7 +220,7 @@ async function initUnlockedUI() {
   });
 
   // Load options tab settings
-  $('#optSecretScanning').checked = settings.secretScanning !== false;
+  $('#optAutoRedact').checked = settings.autoRedact !== false;
   $('#optAutoDetect').checked = settings.autoDetect !== false;
   $('#optAutoRedact').checked = settings.autoRedactDetected !== false;
   $('#optHighlights').checked = settings.showHighlights || false;
@@ -228,7 +228,7 @@ async function initUnlockedUI() {
 
   // Options tab change handlers
   const optHandlers = [
-    ['optSecretScanning', 'secretScanning'],
+    ['optAutoRedact', 'autoRedact'],
     ['optAutoDetect', 'autoDetect'],
     ['optAutoRedact', 'autoRedactDetected'],
     ['optHighlights', 'showHighlights'],
@@ -713,16 +713,16 @@ function renderTestDiff() {
 
   const smartResult = SmartPatterns.substitute(input, identity);
   const explicitResult = SubstitutionEngine.substitute(smartResult.text, mappings);
-  const secretResult = SecretScanner.redact(explicitResult.text, settings.customSecretPatterns);
+  const redactResult = AutoRedact.redact(explicitResult.text, settings.customRedactPatterns);
 
   const allReplacements = [
     ...smartResult.replacements,
     ...explicitResult.replacements,
-    ...secretResult.redactions,
+    ...redactResult.redactions,
   ];
-  const finalText = secretResult.text;
+  const finalText = redactResult.text;
 
-  if (finalText === input && secretResult.warnings.length === 0) {
+  if (finalText === input && redactResult.warnings.length === 0) {
     output.textContent = input;
     stats.textContent = 'No substitutions detected';
     return;
@@ -738,8 +738,8 @@ function renderTestDiff() {
       `<span class="sub-highlight" title="Was: ${escapeHtml(r.original)} [${r.pattern || r.category}]">${escapedReplaced}</span>`
     );
   }
-  // Highlight secret redactions in red
-  for (const r of secretResult.redactions) {
+  // Highlight auto-redactions in red
+  for (const r of redactResult.redactions) {
     const escapedReplaced = escapeHtml(r.replaced);
     html = html.replace(
       escapedReplaced,
@@ -750,12 +750,12 @@ function renderTestDiff() {
 
   const smartCount = smartResult.replacements.length;
   const explicitCount = explicitResult.replacements.length;
-  const secretCount = secretResult.redactions.length;
-  const warnCount = secretResult.warnings.length;
+  const redactCount = redactResult.redactions.length;
+  const warnCount = redactResult.warnings.length;
   const parts = [];
   if (smartCount > 0) parts.push(`${smartCount} smart`);
   if (explicitCount > 0) parts.push(`${explicitCount} explicit`);
-  if (secretCount > 0) parts.push(`${secretCount} secrets redacted`);
+  if (redactCount > 0) parts.push(`${redactCount} auto-redacted`);
   if (warnCount > 0) parts.push(`${warnCount} warnings`);
 
   // Auto-detect unconfigured PPI in the final text

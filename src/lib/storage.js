@@ -40,6 +40,7 @@ const DEFAULT_SETTINGS = {
   autoAddDetected: true,
   maxLogEntries: 100,
   customDomains: [],
+  customSecretPatterns: [],
   categories: ['name', 'email', 'phone', 'address', 'ssn', 'dob', 'domain', 'password', 'general'],
   browserSync: false,
 };

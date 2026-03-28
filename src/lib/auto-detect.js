@@ -2,7 +2,7 @@
  * Silent Send - Auto-Detect
  *
  * Scans text for potential PPI that the user hasn't configured.
- * This catches things the identity and secret scanner can't —
+ * This catches things the identity and auto-redact scanner can't —
  * because the user forgot or didn't know to configure them.
  *
  * Returns warnings (not auto-redactions) so the user can decide.

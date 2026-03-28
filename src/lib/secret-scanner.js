@@ -1,10 +1,12 @@
 /**
- * Silent Send - Secret Scanner
+ * Silent Send - Auto Redact (Secret Scanner)
  *
  * Detects common secret/credential patterns in text and either
  * warns or auto-redacts them. This catches things the identity-based
  * smart patterns can't: API keys, tokens, passwords, SSNs, credit
  * cards, private keys, connection strings, etc.
+ *
+ * Supports user-defined custom patterns for proprietary token formats.
  *
  * Each pattern has:
  *   - name: human-readable label
@@ -163,12 +165,37 @@ const SECRET_PATTERNS = [
 
 const SecretScanner = {
   /**
-   * Scan text for secrets. Returns list of findings.
+   * Build the full pattern list (built-in + custom).
+   * Custom patterns come from settings.customSecretPatterns.
    */
-  scan(text) {
-    const findings = [];
+  _buildPatterns(customPatterns) {
+    const all = [...SECRET_PATTERNS];
+    if (Array.isArray(customPatterns)) {
+      for (const cp of customPatterns) {
+        if (!cp.enabled || !cp.pattern) continue;
+        try {
+          all.push({
+            name: cp.name || 'Custom Pattern',
+            regex: new RegExp(cp.pattern, 'g'),
+            redact: cp.redact || '[REDACTED-CUSTOM]',
+            severity: 'critical',
+          });
+        } catch { /* invalid regex — skip */ }
+      }
+    }
+    return all;
+  },
 
-    for (const pattern of SECRET_PATTERNS) {
+  /**
+   * Scan text for secrets. Returns list of findings.
+   * @param {string} text
+   * @param {Array} [customPatterns] — from settings.customSecretPatterns
+   */
+  scan(text, customPatterns) {
+    const findings = [];
+    const patterns = this._buildPatterns(customPatterns);
+
+    for (const pattern of patterns) {
       // Reset regex lastIndex
       pattern.regex.lastIndex = 0;
       let match;
@@ -204,9 +231,11 @@ const SecretScanner = {
   /**
    * Redact all critical secrets in text. Warnings are not auto-redacted.
    * Returns { text, redactions[] }
+   * @param {string} text
+   * @param {Array} [customPatterns] — from settings.customSecretPatterns
    */
-  redact(text) {
-    const findings = this.scan(text);
+  redact(text, customPatterns) {
+    const findings = this.scan(text, customPatterns);
     const redactions = [];
     let result = text;
 

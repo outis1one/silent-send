@@ -49,17 +49,38 @@
       </div>
       <div class="setting-row">
         <div>
-          <label>Secret scanning</label>
-          <p class="setting-desc">Auto-detect and redact API keys, tokens, passwords, SSNs, credit card numbers</p>
+          <label>Auto Redact</label>
+          <p class="setting-desc">Automatically detect and redact API keys, tokens, passwords, SSNs, credit card numbers, and custom patterns</p>
         </div>
         <label class="toggle">
           <input type="checkbox" id="secretScanning" checked>
           <span class="toggle-slider"></span>
         </label>
       </div>
+
+      <!-- Custom Secret Patterns -->
+      <div style="margin:12px 0;padding:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
+        <h3 style="font-size:13px;font-weight:600;margin:0 0 4px">Custom Secret Patterns</h3>
+        <p class="setting-desc" style="margin-bottom:8px">
+          Define your own patterns to catch proprietary tokens, internal URLs with keys, or any format the built-in scanner doesn't cover.
+        </p>
+        <div id="customSecretList"></div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <input type="text" id="newSecretName" placeholder="Name (e.g. ControlD Token)" style="flex:1;min-width:140px;font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px">
+            <input type="text" id="newSecretPattern" placeholder="Regex or prefix (e.g. ctrl_[A-Za-z0-9]{20,})" style="flex:2;min-width:200px;font-size:12px;font-family:monospace;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px">
+          </div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input type="text" id="newSecretRedact" placeholder="Replacement (default: [REDACTED-NAME])" style="flex:1;font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px">
+            <button class="btn btn-primary btn-sm" id="btnAddSecretPattern">Add Pattern</button>
+          </div>
+        </div>
+        <p class="setting-desc" style="margin-top:6px;margin-bottom:0">
+          <strong>Tip:</strong> For a URL like <code>https://dns.example.com/abc123</code>, use a pattern like <code>dns\.example\.com/[A-Za-z0-9;]+</code> to match the secret path segment.
+        </p>
+      </div>
+
       <div class="setting-row">
-        <div>
-          <label>Auto-detect unconfigured PPI</label>
           <p class="setting-desc">Warn when potential personal data (IPs, addresses, paths) is detected that you haven't configured</p>
         </div>
         <label class="toggle">
@@ -359,7 +380,7 @@
     <!-- Organization -->
     <section class="section">
       <h2>Organization</h2>
-      <p class="section-desc">Join an organization to receive required substitution rules and secret scanner patterns from your admin. Org rules merge with your personal rules and cannot be disabled.</p>
+      <p class="section-desc">Join an organization to receive required substitution rules and auto-redact patterns from your admin. Org rules merge with your personal rules and cannot be disabled.</p>
 
       <div id="orgNotJoined">
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">

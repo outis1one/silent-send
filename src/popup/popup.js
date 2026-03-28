@@ -713,7 +713,7 @@ function renderTestDiff() {
 
   const smartResult = SmartPatterns.substitute(input, identity);
   const explicitResult = SubstitutionEngine.substitute(smartResult.text, mappings);
-  const secretResult = SecretScanner.redact(explicitResult.text);
+  const secretResult = SecretScanner.redact(explicitResult.text, settings.customSecretPatterns);
 
   const allReplacements = [
     ...smartResult.replacements,

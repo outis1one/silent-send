@@ -198,9 +198,9 @@ const OrgPolicy = {
   },
 
   /**
-   * Get org-required secret scanner patterns.
+   * Get org-required auto-redact patterns.
    *
-   * @returns {Array} additional patterns to add to the secret scanner
+   * @returns {Array} additional patterns to add to auto-redact
    */
   async getOrgSecretPatterns() {
     const policy = await this.getPolicy();

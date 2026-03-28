@@ -301,7 +301,7 @@
     const explicit = substitute(smart.text, mappings);
     allReplacements.push(...explicit.replacements);
 
-    // 3. Secret scanner (API keys, tokens, SSNs, credit cards, etc.)
+    // 3. Auto Redact (API keys, tokens, SSNs, credit cards, custom patterns, etc.)
     let finalText = explicit.text;
     if (settings.secretScanning !== false) {
       const secrets = scanAndRedactSecrets(finalText);
@@ -665,8 +665,9 @@
   }
 
   // ============================================================
-  // Secret Scanner (inline for page world)
-  // Detects API keys, tokens, passwords, SSNs, credit cards, etc.
+  // Auto Redact — Secret Scanner (inline for page world)
+  // Detects API keys, tokens, passwords, SSNs, credit cards,
+  // plus user-defined custom patterns from settings.
   // ============================================================
   const SECRET_PATTERNS = [
     // OpenAI
@@ -710,7 +711,17 @@
     const redactions = [];
     let result = text;
 
-    for (const pat of SECRET_PATTERNS) {
+    // Combine built-in + custom patterns
+    const allPatterns = [...SECRET_PATTERNS];
+    const custom = settings.customSecretPatterns || [];
+    for (const cp of custom) {
+      if (!cp.enabled || !cp.pattern) continue;
+      try {
+        allPatterns.push({ name: cp.name, re: new RegExp(cp.pattern, 'g'), to: cp.redact });
+      } catch { /* invalid regex — skip */ }
+    }
+
+    for (const pat of allPatterns) {
       pat.re.lastIndex = 0;
       const matches = [];
       let m;

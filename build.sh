@@ -32,7 +32,7 @@ build() {
 
   # Copy other root files
   cp README.md "$out/" 2>/dev/null || true
-  cp test-suite.html "$out/" 2>/dev/null || true
+  cp test-suite.html test-suite.js "$out/" 2>/dev/null || true
 
   echo "  → $out/ ready"
 }

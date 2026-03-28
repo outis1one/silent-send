@@ -1,6 +1,6 @@
 {
   "name": "silent-send",
-  "version": "2.0.5",
+  "version": "0.9.0",
   "private": true,
   "license": "BSL-1.1",
   "description": "Browser extension that substitutes personal data before sending to AI services",

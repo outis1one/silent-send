@@ -564,7 +564,7 @@ Contributions welcome. If you find a bug, especially a privacy-related one, plea
 
 ## Support
 
-Silent Send is a weekend project — built because the developer wanted it and didn't look to see if something else already existed before building it with Claude. No donations needed. If you find it useful, great — enjoy. If it helps you keep your personally identifiable information private, that's thanks enough. More people having access to privacy is the goal.
+Silent Send is a weekend project — built because the developer wanted it and could not find what the developer wanted (reveal especially). No donations needed. If you find it useful, great — enjoy. If it helps you keep your personally identifiable information private, that's thanks enough. More people having access to privacy is the goal.
 
 That said, Claude access isn't free. If you have a desire to give a coffee back, it would be appreciated — but don't feel any obligation to tip.
 

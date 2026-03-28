@@ -1,11 +1,11 @@
 /**
  * Silent Send - Document Scanner
  *
- * Scans uploaded documents for PPI and substitutes/redacts before
+ * Scans uploaded documents for PII and substitutes/redacts before
  * the file reaches the AI service.
  *
  * Supported formats:
- * - PDF: Extract text, scan for PPI, create sanitized plaintext version
+ * - PDF: Extract text, scan for PII, create sanitized plaintext version
  *   (PDFs can't be reliably edited in-place without breaking layout)
  * - DOCX: Parse XML, find-replace text, repackage ZIP (layout preserved)
  * - XLSX: Parse cells, find-replace values, repackage (formatting preserved)
@@ -13,7 +13,7 @@
  *
  * Modes:
  * - Silent: substitute and upload (default for text files)
- * - Preview: show PPI findings, let user confirm before upload (default for PDF/DOCX/XLSX)
+ * - Preview: show PII findings, let user confirm before upload (default for PDF/DOCX/XLSX)
  *
  * Integration:
  * - The fetch interceptor in content.js detects multipart/form-data uploads
@@ -70,9 +70,9 @@ const DocumentScanner = {
   },
 
   /**
-   * PDF: extract text, scan for PPI, create sanitized text file.
+   * PDF: extract text, scan for PII, create sanitized text file.
    * PDFs can't be reliably edited in-place, so we extract text,
-   * substitute PPI, and send the clean text instead.
+   * substitute PII, and send the clean text instead.
    */
   async _processPDF(file, filename, substituteAll, options) {
     const text = await this._extractPDFText(file);

@@ -35,7 +35,7 @@
   border-radius: 2px;
 }
 
-/* Auto-detect PPI warning banner */
+/* Auto-detect PII warning banner */
 .ss-autodetect-warning {
   position: fixed;
   top: 16px;
@@ -136,7 +136,7 @@
   font-style: italic;
 }
 
-/* Pre-send PPI warning (spellcheck-style, appears while typing) */
+/* Pre-send PII warning (spellcheck-style, appears while typing) */
 .ss-presend-warning {
   position: fixed;
   top: 16px;

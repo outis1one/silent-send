@@ -288,7 +288,7 @@
 
   // ============================================================
   // Combined substitution: smart patterns + explicit + auto-redact
-  // + auto-detect warning for unconfigured PPI
+  // + auto-detect warning for unconfigured PII
   // ============================================================
   function substituteAll(text) {
     const allReplacements = [];
@@ -309,12 +309,12 @@
       finalText = redacted.text;
     }
 
-    // 4. Auto-detect: scan the FINAL text for unconfigured PPI
+    // 4. Auto-detect: scan the FINAL text for unconfigured PII
     //    Auto-redact if enabled, otherwise just warn
     if (settings.autoDetect !== false) {
-      const warnings = autoDetectPPI(finalText, identity);
+      const warnings = autoDetectPII(finalText, identity);
       if (warnings.length > 0) {
-        // Auto-redact detected PPI in the outbound text
+        // Auto-redact detected PII in the outbound text
         if (settings.autoRedactDetected !== false) {
           for (let i = warnings.length - 1; i >= 0; i--) {
             const w = warnings[i];
@@ -343,9 +343,9 @@
   }
 
   // ============================================================
-  // Auto-Detect PPI Scanner (inline for page world)
+  // Auto-Detect PII Scanner (inline for page world)
   // ============================================================
-  const PPI_PATTERNS = [
+  const PII_PATTERNS = [
     // Network
     { name: 'Private IP', re: /\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})\b/g,
       hint: 'Private IP address', cat: 'network' },
@@ -574,7 +574,7 @@
     });
   }
 
-  function autoDetectPPI(text, ident) {
+  function autoDetectPII(text, ident) {
     if (!text || text.length < 5) return [];
     const hasContext = CONTEXT_WORDS_RE.test(text);
 
@@ -590,7 +590,7 @@
     }
 
     const findings = [];
-    for (const pat of PPI_PATTERNS) {
+    for (const pat of PII_PATTERNS) {
       if (pat.contextRequired && !hasContext) continue;
       pat.re.lastIndex = 0;
       let m;
@@ -642,7 +642,7 @@
 
     safeHTML(warningEl, `
       <div class="ss-ad-header">
-        <strong>Silent Send detected potential PPI that may not be substituted:</strong>
+        <strong>Silent Send detected potential PII that may not be substituted:</strong>
         <button class="ss-ad-close">&times;</button>
       </div>
       ${items}
@@ -978,7 +978,7 @@
   // ============================================================
   // Document Upload Processing
   //
-  // Scans files in FormData uploads for PPI. Supports PDF, DOCX,
+  // Scans files in FormData uploads for PII. Supports PDF, DOCX,
   // XLSX, and text files. Shows preview for binary formats.
   // ============================================================
 
@@ -1050,8 +1050,8 @@
   }
 
   /**
-   * Scan a document file for PPI. Strategy: extract text from any
-   * format, substitute PPI, upload as plaintext. The AI extracts text
+   * Scan a document file for PII. Strategy: extract text from any
+   * format, substitute PII, upload as plaintext. The AI extracts text
    * from files anyway — no need to preserve formatting in a file
    * the user never gets back. Original stays untouched on disk.
    *
@@ -1308,7 +1308,7 @@
 
       safeHTML(docPreviewEl, `
         <div class="ss-dp-header">
-          <strong>PPI found in ${esc(filename)}</strong>
+          <strong>PII found in ${esc(filename)}</strong>
           <span class="ss-dp-count">${preview.replacementCount} item(s)</span>
         </div>
         <div class="ss-dp-note">${preview.note || ''}</div>
@@ -1745,7 +1745,7 @@
   }
 
   // ============================================================
-  // Pre-Send PPI Detection — scans as you type/paste (spellcheck style)
+  // Pre-Send PII Detection — scans as you type/paste (spellcheck style)
   // ============================================================
 
   // Generate obviously-fake values using reserved/standard ranges
@@ -1810,7 +1810,7 @@
 
     safeHTML(preSendWarningEl, `
       <div class="ss-ad-header">
-        <strong>Potential PPI detected — not yet configured:</strong>
+        <strong>Potential PII detected — not yet configured:</strong>
         <button class="ss-ad-close">&times;</button>
       </div>
       ${items}
@@ -1851,12 +1851,12 @@
         // Update local mappings so the fetch interceptor uses them immediately
         mappings = currentMappings;
 
-        // Replace the PPI value in the current input right now
+        // Replace the PII value in the current input right now
         if (inputEl) {
           replaceInInput(inputEl, real, fake);
-          // Re-scan — will dismiss warning if no more PPI remains
+          // Re-scan — will dismiss warning if no more PII remains
           if (inputScanTimer) clearTimeout(inputScanTimer);
-          inputScanTimer = setTimeout(() => scanInputForPPI(inputEl), 150);
+          inputScanTimer = setTimeout(() => scanInputForPII(inputEl), 150);
         }
 
         // Visual feedback
@@ -1879,7 +1879,7 @@
         // Re-scan to update warning
         if (inputEl) {
           if (inputScanTimer) clearTimeout(inputScanTimer);
-          inputScanTimer = setTimeout(() => scanInputForPPI(inputEl), 150);
+          inputScanTimer = setTimeout(() => scanInputForPII(inputEl), 150);
         }
       });
     });
@@ -1930,14 +1930,14 @@
   // Scan input on type and paste
   let inputScanTimer = null;
 
-  function scanInputForPPI(target) {
+  function scanInputForPII(target) {
     const text = target.textContent || target.value || '';
     if (!text || text.length < 5) {
       if (preSendWarningEl) preSendWarningEl.classList.remove('visible');
       return;
     }
 
-    const warnings = autoDetectPPI(text, identity);
+    const warnings = autoDetectPII(text, identity);
     if (warnings.length > 0) {
       showPreSendWarning(warnings, target);
     } else if (preSendWarningEl) {
@@ -1951,7 +1951,7 @@
     if (target.matches?.('[contenteditable], textarea, input[type="text"]')) {
       // Debounce — don't scan on every keystroke
       if (inputScanTimer) clearTimeout(inputScanTimer);
-      inputScanTimer = setTimeout(() => scanInputForPPI(target), 800);
+      inputScanTimer = setTimeout(() => scanInputForPII(target), 800);
     }
   }, true);
 
@@ -1961,7 +1961,7 @@
     if (target.matches?.('[contenteditable], textarea, input[type="text"]') ||
         target.closest?.('[contenteditable]')) {
       // Scan shortly after paste completes
-      setTimeout(() => scanInputForPPI(target.closest?.('[contenteditable]') || target), 200);
+      setTimeout(() => scanInputForPII(target.closest?.('[contenteditable]') || target), 200);
     }
   }, true);
 

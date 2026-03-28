@@ -1,14 +1,14 @@
 /**
  * Silent Send - Auto-Detect
  *
- * Scans text for potential PPI that the user hasn't configured.
+ * Scans text for potential PII that the user hasn't configured.
  * This catches things the identity and auto-redact scanner can't —
  * because the user forgot or didn't know to configure them.
  *
  * Returns warnings (not auto-redactions) so the user can decide.
  */
 
-const PPI_PATTERNS = [
+const PII_PATTERNS = [
   // --- Network ---
   {
     name: 'Private IP Address',
@@ -21,7 +21,7 @@ const PPI_PATTERNS = [
     regex: /\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b/g,
     category: 'network',
     hint: 'IP address — could identify your network',
-    // Exclude common non-PPI IPs
+    // Exclude common non-PII IPs
     exclude: /^(?:127\.0\.0\.1|0\.0\.0\.0|255\.255\.255\.\d+|8\.8\.[84]\.[84]|1\.1\.1\.1|1\.0\.0\.1)$/,
   },
   {
@@ -126,12 +126,12 @@ const PPI_PATTERNS = [
   },
 ];
 
-// Context words that make ambiguous patterns more likely to be PPI
+// Context words that make ambiguous patterns more likely to be PII
 const CONTEXT_WORDS = /\b(?:born|birthday|dob|birth|passport|license|driver|ssn|social\s*security|address|home|live|lives|reside|zip|postal)\b/i;
 
 const AutoDetect = {
   /**
-   * Scan text for potential unconfigured PPI.
+   * Scan text for potential unconfigured PII.
    * Pass in identity so we can skip values the user already configured.
    *
    * Returns array of { name, value, hint, category, index }
@@ -167,7 +167,7 @@ const AutoDetect = {
       }
     }
 
-    for (const pattern of PPI_PATTERNS) {
+    for (const pattern of PII_PATTERNS) {
       // Skip context-dependent patterns if no context words present
       if (pattern.contextRequired && !hasContext) continue;
 

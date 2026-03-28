@@ -99,20 +99,20 @@ Go to **Options** → **Transfer Data** → **Import CSV / Password Export**.
 
 ### Document scanning
 
-When you upload files to an AI service, Silent Send extracts and scans the text for PPI before the file is sent:
+When you upload files to an AI service, Silent Send extracts and scans the text for PII before the file is sent:
 
 | Format | How it works |
 |---|---|
-| PDF | Text extracted from content streams, PPI substituted, uploaded as clean plaintext |
-| DOCX, XLSX, PPTX | XML text extracted from ZIP structure, PPI substituted, uploaded as plaintext |
-| ODT, ODS, ODP | OpenDocument XML text extracted, PPI substituted |
+| PDF | Text extracted from content streams, PII substituted, uploaded as clean plaintext |
+| DOCX, XLSX, PPTX | XML text extracted from ZIP structure, PII substituted, uploaded as plaintext |
+| ODT, ODS, ODP | OpenDocument XML text extracted, PII substituted |
 | DOC, XLS | Legacy binary format — readable text runs extracted |
 | RTF | Formatting stripped, text extracted |
 | TXT, CSV, JSON, code files | Direct string substitution |
 | Images (PNG, JPG, etc.) | Not scanned — no text to extract |
 | Scanned PDFs (image-only) | Not scanned — no text layer |
 
-For PDF/DOCX/XLSX uploads, a preview panel shows what PPI was found before uploading. You can choose to substitute and upload, or upload the original. Text files are substituted silently. The original file on your disk is never modified — substitution only happens to the in-flight upload.
+For PDF/DOCX/XLSX uploads, a preview panel shows what PII was found before uploading. You can choose to substitute and upload, or upload the original. Text files are substituted silently. The original file on your disk is never modified — substitution only happens to the in-flight upload.
 
 ## First-time setup
 
@@ -390,7 +390,7 @@ src/
     crypto.js           — AES-256-GCM encryption, PBKDF2 key derivation, TOTP (RFC 6238), WebAuthn, key caching
     sync.js             — Cross-browser sync with encryption (browser sync, Gist, folder, URL, sync codes)
     storage.js          — Browser storage wrapper with transparent at-rest encryption
-    auto-detect.js      — PPI pattern detection (IPs, addresses, paths, proper nouns)
+    auto-detect.js      — PII pattern detection (IPs, addresses, paths, proper nouns)
     document-scanner.js — PDF/DOCX/XLSX/ODT/RTF text extraction and scanning
     import-parser.js    — Bulk import from CSV, password managers, autofill exports
     version-history.js  — Sync version snapshots + rollback
@@ -427,7 +427,7 @@ For teams that want to enforce privacy rules across all members:
 1. **Admin** creates a JSON policy file hosted at any URL (static file, S3, cloud function)
 2. **Team members** join by entering the policy URL or an invite code in Options → Organization
 3. **Org rules merge** with personal rules — required mappings are always active and cannot be disabled
-4. **Compliance dashboard** shows which required fields are configured (without revealing actual PPI)
+4. **Compliance dashboard** shows which required fields are configured (without revealing actual PII)
 5. **Policy updates** are polled automatically (hourly)
 
 ### Org policy format
@@ -479,7 +479,7 @@ When you enable **sync encryption** (Options → Sync Between Browsers → Sync 
 | TOTP secret | Authenticator app shared secret |
 | All sync data | Everything sent to Gist, sync folders, custom URLs, browser sync |
 
-**Only two things remain plaintext** — the encryption salt (needed to derive the key) and a verification blob (needed to check the password). Neither contains PPI.
+**Only two things remain plaintext** — the encryption salt (needed to derive the key) and a verification blob (needed to check the password). Neither contains PII.
 
 Without at-rest encryption, data is stored in plaintext in the browser's local storage (similar to cookies and localStorage). Anyone with file system access to your browser profile directory could read it.
 
@@ -561,3 +561,16 @@ The source code is available for inspection — you don't have to take our word 
 [Business Source License 1.1](LICENSE) — free for personal, non-commercial use only. Commercial use is not permitted. The code converts to MIT on March 26, 2030.
 
 Contributions welcome. If you find a bug, especially a privacy-related one, please [open an issue](https://github.com/outis1one/silent-send/issues).
+
+## Support
+
+Silent Send is a weekend project — built because the developer wanted it and didn't look to see if something else already existed before building it with Claude. No donations needed. If you find it useful, great — enjoy. If it helps you keep your personally identifiable information private, that's thanks enough. More people having access to privacy is the goal.
+
+That said, Claude access isn't free. If you have a desire to give a coffee back, it would be appreciated — but don't feel any obligation to tip.
+
+**[Buy me a coffee on Ko-fi](https://ko-fi.com/YOUR_KOFI_USERNAME)**
+
+A few things to know:
+- Donations do not influence updates. Silent Send may or may not get updates based on the developer's usage and available time.
+- Donating does not create any warranty, support obligation, or expectation of future development.
+- This is and always will be a free, non-commercial project.

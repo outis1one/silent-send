@@ -558,6 +558,6 @@ The source code is available for inspection — you don't have to take our word 
 
 ## License
 
-[Business Source License 1.1](LICENSE) — free for personal, non-commercial use. Commercial use requires a paid license. The code converts to MIT on March 26, 2030.
+[Business Source License 1.1](LICENSE) — free for personal, non-commercial use only. Commercial use is not permitted. The code converts to MIT on March 26, 2030.
 
 Contributions welcome. If you find a bug, especially a privacy-related one, please [open an issue](https://github.com/outis1one/silent-send/issues).

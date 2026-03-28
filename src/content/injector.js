@@ -91,6 +91,8 @@
         // Also log directly from the injector (content script world)
         // in case the background worker is asleep
         const replacements = event.data.replacements || [];
+        const settingsResult = await api.storage.local.get('ss_settings');
+        const maxLog = settingsResult.ss_settings?.maxLogEntries || 100;
         for (const r of replacements) {
           const log = (await api.storage.local.get('ss_activity_log')).ss_activity_log || [];
           log.unshift({
@@ -104,8 +106,8 @@
             pattern: r.pattern || '',
             url: location.href,
           });
-          // Trim
-          if (log.length > 100) log.length = 100;
+          // Trim to user-configured max
+          if (log.length > maxLog) log.length = maxLog;
           await api.storage.local.set({ ss_activity_log: log });
         }
       }

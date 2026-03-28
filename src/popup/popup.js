@@ -222,7 +222,7 @@ async function initUnlockedUI() {
   // Load options tab settings
   $('#optAutoRedact').checked = settings.autoRedact !== false;
   $('#optAutoDetect').checked = settings.autoDetect !== false;
-  $('#optAutoRedact').checked = settings.autoRedactDetected !== false;
+  $('#optAutoRedactDetected').checked = settings.autoRedactDetected !== false;
   $('#optHighlights').checked = settings.showHighlights || false;
   $('#optDocPreview').checked = settings.docScanPreview !== false;
 
@@ -230,7 +230,7 @@ async function initUnlockedUI() {
   const optHandlers = [
     ['optAutoRedact', 'autoRedact'],
     ['optAutoDetect', 'autoDetect'],
-    ['optAutoRedact', 'autoRedactDetected'],
+    ['optAutoRedactDetected', 'autoRedactDetected'],
     ['optHighlights', 'showHighlights'],
     ['optDocPreview', 'docScanPreview'],
   ];

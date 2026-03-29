@@ -1035,15 +1035,37 @@
     }
   }
 
+  function unrevealText(text) {
+    const pairs = getRevealPairs();
+    let result = text;
+    for (const p of pairs) {
+      const escaped = esc(p.to);   // p.to is the real value
+      const regex = new RegExp(escaped, p.caseSensitive ? 'g' : 'gi');
+      result = result.replace(regex, p.from);  // p.from is the substitute
+    }
+    return result;
+  }
+
   function unrevealInElement(el) {
     if (SKIP_REVEAL_TAGS.has(el.tagName)) return;
 
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const parent = node.parentElement;
+        if (parent && SKIP_REVEAL_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
+        if (parent?.closest?.('.ss-autodetect-warning, .ss-presend-warning, .ss-reveal-badge')) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
     let textNode;
     while ((textNode = walker.nextNode())) {
-      const original = originalTexts.get(textNode);
-      if (original && textNode.textContent !== original) {
-        textNode.textContent = original;
+      const text = textNode.textContent;
+      if (!text || text.length < MIN_STRING_LENGTH) continue;
+      const unrevealed = unrevealText(text);
+      if (unrevealed !== text) {
+        textNode.textContent = unrevealed;
+        // Update saved original so future reveals start from the right state
+        originalTexts.set(textNode, unrevealed);
       }
     }
   }

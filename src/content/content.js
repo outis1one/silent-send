@@ -287,7 +287,7 @@
   }
 
   // ============================================================
-  // Combined substitution: smart patterns + explicit + auto-redact
+  // Combined substitution: smart patterns + explicit + secret scan
   // + auto-detect warning for unconfigured PII
   // ============================================================
   function substituteAll(text) {
@@ -301,12 +301,12 @@
     const explicit = substitute(smart.text, mappings);
     allReplacements.push(...explicit.replacements);
 
-    // 3. Auto Redact (API keys, tokens, SSNs, credit cards, custom patterns, etc.)
+    // 3. Secret scanner (API keys, tokens, SSNs, credit cards, etc.)
     let finalText = explicit.text;
     if (settings.autoRedact !== false) {
-      const redacted = runAutoRedact(finalText);
-      allReplacements.push(...redacted.redactions);
-      finalText = redacted.text;
+      const secrets = runAutoRedact(finalText);
+      allReplacements.push(...secrets.redactions);
+      finalText = secrets.text;
     }
 
     // 4. Auto-detect: scan the FINAL text for unconfigured PII
@@ -672,9 +672,8 @@
   }
 
   // ============================================================
-  // Auto Redact (inline for page world)
-  // Detects API keys, tokens, passwords, SSNs, credit cards,
-  // plus user-defined custom patterns from settings.
+  // Secret Scanner (inline for page world)
+  // Detects API keys, tokens, passwords, SSNs, credit cards, etc.
   // ============================================================
   const REDACT_PATTERNS = [
     // OpenAI
@@ -1473,17 +1472,13 @@
   // session, preventing false positives (e.g. "user" in AI prose).
   function buildRevealPairs() {
     const pairs = [];
-    const added = new Set();
 
     // Helper: only add if this substitute was actually sent
     function addIfUsed(from, to, caseSensitive) {
       if (!from || !to) return;
-      const key = from.toLowerCase();
-      if (added.has(key)) return;
-      const entry = sessionSubstitutions.get(key);
+      const entry = sessionSubstitutions.get(from.toLowerCase());
       if (entry) {
         pairs.push({ from, to, caseSensitive });
-        added.add(key);
       }
     }
 
@@ -1496,9 +1491,9 @@
       for (const e of (identity.emails || [])) {
         addIfUsed(e.substitute, e.real);
       }
-      // For names: DON'T add individual first/last — the smart pattern engine
-      // combines them (e.g. "Ademo Demo" for "John Smith"). The catch-all
-      // below picks up the combined form from sessionSubstitutions.
+      for (const n of (identity.names || [])) {
+        addIfUsed(n.substitute, n.real);
+      }
       for (const u of (identity.usernames || [])) {
         addIfUsed(u.substitute, u.real);
       }
@@ -1510,45 +1505,27 @@
       }
     }
 
-    // Catch-all: add any session substitution not already covered above.
-    // This picks up combined names ("Ademo Demo" → "John Smith"),
-    // auto-detected PII, and auto-redacted secrets.
-    // Skip entries that are substrings of a longer entry (e.g. "Ademo"
-    // is part of "Ademo Demo") to prevent partial replacements.
-    const allKeys = [...sessionSubstitutions.keys()];
+    // Also add auto-detect and secret scanner substitutions from this session
     for (const [key, entry] of sessionSubstitutions) {
-      if (added.has(key)) continue;
-      // Skip if this entry's replaced value is a substring of a longer one
-      const isPartOfLonger = allKeys.some(k =>
-        k !== key && k.includes(key) && sessionSubstitutions.has(k)
-      );
-      if (isPartOfLonger) continue;
-      pairs.push({ from: entry.replaced, to: entry.original });
-      added.add(key);
+      if (!pairs.some(p => p.from.toLowerCase() === key)) {
+        pairs.push({ from: entry.replaced, to: entry.original });
+      }
     }
 
     pairs.sort((a, b) => b.from.length - a.from.length);
     return pairs;
   }
 
-  // Cache — invalidate when identity/mappings change or new substitutions happen
-  // Settings-only updates (e.g. reveal toggle) do NOT invalidate
+  // Cache — invalidate when config changes or new substitutions happen
   let _revealPairsCache = null;
-  let _lastSessionSubsSize = 0;
+  let _revealPairsCacheSize = 0;
   window.addEventListener('message', (event) => {
-    if (event.data?.type === 'ss:config-updated') {
-      if (event.data.mappings || event.data.identity) _revealPairsCache = null;
-    }
+    if (event.data?.type === 'ss:config-updated') _revealPairsCache = null;
     if (event.data?.type === 'ss:substitution-performed') _revealPairsCache = null;
   });
 
   function getRevealPairs() {
-    // Rebuild if cache cleared OR if new substitutions were added
-    const currentSize = sessionSubstitutions.size;
-    if (!_revealPairsCache || currentSize !== _lastSessionSubsSize) {
-      _revealPairsCache = buildRevealPairs();
-      _lastSessionSubsSize = currentSize;
-    }
+    if (!_revealPairsCache) _revealPairsCache = buildRevealPairs();
     return _revealPairsCache;
   }
 
@@ -1698,13 +1675,13 @@
   // Elements to skip when revealing (inputs, scripts, styles, extension UI, navigation)
   const SKIP_REVEAL_TAGS = new Set([
     'SCRIPT', 'STYLE', 'NOSCRIPT', 'IFRAME', 'INPUT', 'TEXTAREA', 'SELECT',
+    'NAV', 'ASIDE', 'HEADER', 'FOOTER',
   ]);
 
-  // Skip reveal in navigation and sidebars — but NOT broadly by class name,
-  // as sites like Claude.ai use "header" in class names for chat content areas
+  // Skip reveal in navigation, sidebars, headers, and other non-chat UI
   function isInNonChatArea(el) {
     if (!el) return false;
-    return !!el.closest('nav, aside, [role="navigation"], [role="complementary"], [data-sidebar]');
+    return !!el.closest('nav, aside, header, footer, [role="navigation"], [role="banner"], [role="complementary"], [data-sidebar], [class*="sidebar"], [class*="Sidebar"], [class*="nav-"], [class*="Nav"], [class*="menu"], [class*="Menu"], [class*="header"], [class*="Header"]');
   }
 
   // Reveal ALL text on the page + apply highlights
@@ -1816,14 +1793,6 @@
       unrevealAllResponses();
     }
     prevRevealMode = settings.revealMode;
-  }
-
-  // If reveal mode was already ON at page load, start the interval immediately
-  if (settings.revealMode) {
-    console.log('[Silent Send] Reveal mode ON (from saved settings)');
-    revealInterval = setInterval(() => {
-      if (settings.revealMode) revealAllResponses();
-    }, 2000);
   }
 
   // Hook into config updates to detect reveal toggle

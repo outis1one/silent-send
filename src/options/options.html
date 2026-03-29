@@ -69,6 +69,16 @@
       </div>
       <div class="setting-row">
         <div>
+          <label>Flag capitalized words as possible names/orgs</label>
+          <p class="setting-desc">Warn when capitalized words mid-sentence may be names, company names, or project names not in your configured identity (high false-positive rate)</p>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="detectProperNouns">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <div>
           <label>Auto-redact detected PII on send</label>
           <p class="setting-desc">Automatically replace detected PII with generic placeholders (192.0.2.1, 123 Example Street, etc.) when sending</p>
         </div>

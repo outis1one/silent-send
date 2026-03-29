@@ -22,6 +22,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('#showHighlights').checked = settings.showHighlights || false;
   $('#secretScanning').checked = settings.secretScanning !== false;
   $('#autoDetect').checked = settings.autoDetect !== false;
+  $('#detectProperNouns').checked = settings.detectProperNouns === true;
   $('#autoRedactDetected').checked = settings.autoRedactDetected !== false;
   $('#autoAddDetected').checked = settings.autoAddDetected !== false;
   $('#maxLogEntries').value = settings.maxLogEntries || 200;
@@ -271,6 +272,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   $('#autoDetect').addEventListener('change', async (e) => {
     await Storage.saveSettings({ autoDetect: e.target.checked });
+  });
+
+  $('#detectProperNouns').addEventListener('change', async (e) => {
+    await Storage.saveSettings({ detectProperNouns: e.target.checked });
   });
 
   $('#autoRedactDetected').addEventListener('change', async (e) => {

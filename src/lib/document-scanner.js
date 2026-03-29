@@ -265,7 +265,7 @@ const DocumentScanner = {
             const compressed = new Uint8Array(
               [...streamData].map(c => c.charCodeAt(0))
             );
-            const decompressed = this._inflateSync(compressed);
+            const decompressed = await this._inflateSync(compressed);
             if (decompressed) {
               content = new TextDecoder('latin1').decode(decompressed);
             }

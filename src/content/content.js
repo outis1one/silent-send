@@ -278,7 +278,7 @@
     // 4. Auto-detect: scan the FINAL text for unconfigured PII
     //    Auto-redact if enabled, otherwise just warn
     if (settings.autoDetect !== false) {
-      const warnings = autoDetectPII(finalText, identity);
+      const warnings = autoDetectPII(finalText, identity, { detectProperNouns: settings.detectProperNouns === true });
       if (warnings.length > 0) {
         // Auto-redact detected PII in the outbound text
         if (settings.autoRedactDetected !== false) {
@@ -454,7 +454,7 @@
     });
   }
 
-  function autoDetectPII(text, ident) {
+  function autoDetectPII(text, ident, opts) {
     if (!text || text.length < 5) return [];
     const hasContext = CONTEXT_WORDS_RE.test(text);
 
@@ -483,9 +483,11 @@
     }
 
     // Proper noun heuristic — catch names, company names, project names
-    // that aren't configured in identity
-    const properNouns = detectProperNouns(text, configured);
-    findings.push(...properNouns);
+    // that aren't configured in identity (opt-in, off by default)
+    if (opts?.detectProperNouns) {
+      const properNouns = detectProperNouns(text, configured);
+      findings.push(...properNouns);
+    }
 
     // Deduplicate by value
     const seen = new Set();
@@ -1441,7 +1443,7 @@
       return;
     }
 
-    const warnings = autoDetectPII(text, identity);
+    const warnings = autoDetectPII(text, identity, { detectProperNouns: settings.detectProperNouns === true });
     if (warnings.length > 0) {
       showPreSendWarning(warnings, target);
     } else if (preSendWarningEl) {

@@ -1715,6 +1715,14 @@
     prevRevealMode = settings.revealMode;
   }
 
+  // If reveal mode was already ON at page load, start the interval immediately
+  if (settings.revealMode) {
+    console.log('[Silent Send] Reveal mode ON (from saved settings)');
+    revealInterval = setInterval(() => {
+      if (settings.revealMode) revealAllResponses();
+    }, 2000);
+  }
+
   // Hook into config updates to detect reveal toggle
   window.addEventListener('message', (event) => {
     if (event.source !== window) return;

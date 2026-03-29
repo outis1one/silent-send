@@ -28,6 +28,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('#maxLogEntries').value = settings.maxLogEntries || 200;
   $('#browserSync').checked = settings.browserSync === true;
 
+  const { version } = api.runtime.getManifest();
+  $('#footerVersion').textContent = `Silent Send v${version}`;
+
   renderMappings();
   renderPasswords();
   renderDomains();

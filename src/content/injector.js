@@ -154,7 +154,10 @@
           const val = changes.ss_identity.newValue;
           if (!val?._ssLocalEncrypted) msg.identity = mergeProfiles(val);
         }
-        if (changes.ss_settings) msg.settings = changes.ss_settings.newValue;
+        if (changes.ss_settings) {
+          const val = changes.ss_settings.newValue;
+          if (!val?._ssLocalEncrypted) msg.settings = val;
+        }
 
         // Only post if we have something meaningful to send
         if (msg.mappings || msg.identity || msg.settings) {

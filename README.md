@@ -565,13 +565,11 @@ Silent Send is provided "as is" and "as available" without warranty of any kind,
 - Silent Send is not a substitute for professional data protection, legal compliance, or security tooling. It does not guarantee compliance with any regulation (GDPR, HIPAA, CCPA, PCI-DSS, or otherwise).
 - No contributor, maintainer, or distributor of Silent Send shall be liable for any damages arising from its use, including but not limited to privacy breaches, identity theft, data exposure, or regulatory penalties — whether caused by software bugs, third-party changes, misconfiguration, or any other reason.
 
-Commercial licensees: a commercial license grants the right to use Silent Send in a commercial context. It does not create additional warranties, indemnification, or liability obligations beyond those stated in the license agreement.
-
 The source code is available for inspection — you don't have to take our word for it.
 
 ## License
 
-[Business Source License 1.1](LICENSE) — free for personal, non-commercial use only. Commercial use is not permitted. The code converts to MIT on March 26, 2030.
+[MIT License](LICENSE) — free to use, modify, and distribute. See the LICENSE file for the full disclaimer of warranty and limitation of liability.
 
 Contributions welcome. If you find a bug, especially a privacy-related one, please [open an issue](https://github.com/outis1one/silent-send/issues).
 

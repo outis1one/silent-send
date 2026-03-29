@@ -715,17 +715,17 @@ function renderTestDiff() {
   if (secretCount > 0) parts.push(`${secretCount} secrets redacted`);
   if (warnCount > 0) parts.push(`${warnCount} warnings`);
 
-  // Auto-detect unconfigured PPI in the final text
-  const ppiWarnings = AutoDetect.scan(finalText, identity);
-  if (ppiWarnings.length > 0) parts.push(`${ppiWarnings.length} PPI detected`);
+  // Auto-detect unconfigured PII in the final text
+  const piiWarnings = AutoDetect.scan(finalText, identity);
+  if (piiWarnings.length > 0) parts.push(`${piiWarnings.length} PII detected`);
 
   stats.textContent = `${allReplacements.length} substitution${allReplacements.length !== 1 ? 's' : ''} (${parts.join(', ')})`;
 
-  // Show PPI warnings below stats
-  if (ppiWarnings.length > 0) {
+  // Show PII warnings below stats
+  if (piiWarnings.length > 0) {
     stats.innerHTML += `<div style="margin-top:6px;padding:6px 8px;background:#fef3c7;border-radius:4px;color:#92400e;font-size:11px">
-      <strong>Unconfigured PPI detected:</strong>
-      ${ppiWarnings.map(w => `<div style="margin-top:3px"><code style="background:#fff;padding:1px 4px;border-radius:2px;color:#b45309">${escapeHtml(w.value)}</code> — ${w.hint}</div>`).join('')}
+      <strong>Unconfigured PII detected:</strong>
+      ${piiWarnings.map(w => `<div style="margin-top:3px"><code style="background:#fff;padding:1px 4px;border-radius:2px;color:#b45309">${escapeHtml(w.value)}</code> — ${w.hint}</div>`).join('')}
     </div>`;
   }
 }

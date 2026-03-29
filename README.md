@@ -15,7 +15,7 @@ A browser extension (Chrome, Firefox, and Safari) that intercepts personal infor
 
 > **Browsers:** Chrome, Edge, Brave, Firefox, and Safari. Edge and Brave use the Chrome extension directly.
 >
-> **Desktop apps** (Claude, ChatGPT, Copilot) bypass the browser — use the web version with the extension for PPI protection.
+> **Desktop apps** (Claude, ChatGPT, Copilot) bypass the browser — use the web version with the extension for PII protection.
 >
 > **Note:** Claude and ChatGPT are tested. Other services have interception patterns defined but may need adjustments. PRs welcome.
 

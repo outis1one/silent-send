@@ -254,7 +254,7 @@
 
   // ============================================================
   // Combined substitution: smart patterns + explicit + secret scan
-  // + auto-detect warning for unconfigured PPI
+  // + auto-detect warning for unconfigured PII
   // ============================================================
   function substituteAll(text) {
     const allReplacements = [];
@@ -275,12 +275,12 @@
       finalText = secrets.text;
     }
 
-    // 4. Auto-detect: scan the FINAL text for unconfigured PPI
+    // 4. Auto-detect: scan the FINAL text for unconfigured PII
     //    Auto-redact if enabled, otherwise just warn
     if (settings.autoDetect !== false) {
-      const warnings = autoDetectPPI(finalText, identity);
+      const warnings = autoDetectPII(finalText, identity);
       if (warnings.length > 0) {
-        // Auto-redact detected PPI in the outbound text
+        // Auto-redact detected PII in the outbound text
         if (settings.autoRedactDetected !== false) {
           for (let i = warnings.length - 1; i >= 0; i--) {
             const w = warnings[i];
@@ -309,9 +309,9 @@
   }
 
   // ============================================================
-  // Auto-Detect PPI Scanner (inline for page world)
+  // Auto-Detect PII Scanner (inline for page world)
   // ============================================================
-  const PPI_PATTERNS = [
+  const PII_PATTERNS = [
     // Network
     { name: 'Private IP', re: /\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})\b/g,
       hint: 'Private IP address', cat: 'network' },
@@ -389,7 +389,7 @@
     // Common sentence starters that aren't names
     'please', 'thanks', 'hello', 'hi', 'hey', 'dear', 'sincerely',
     'regards', 'best', 'cheers', 'sorry', 'yes', 'no', 'ok', 'okay',
-    // Days and months (not PPI)
+    // Days and months (not PII)
     'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
     'january', 'february', 'march', 'april', 'may', 'june', 'july',
     'august', 'september', 'october', 'november', 'december',
@@ -454,7 +454,7 @@
     });
   }
 
-  function autoDetectPPI(text, ident) {
+  function autoDetectPII(text, ident) {
     if (!text || text.length < 5) return [];
     const hasContext = CONTEXT_WORDS_RE.test(text);
 
@@ -470,7 +470,7 @@
     }
 
     const findings = [];
-    for (const pat of PPI_PATTERNS) {
+    for (const pat of PII_PATTERNS) {
       if (pat.contextRequired && !hasContext) continue;
       pat.re.lastIndex = 0;
       let m;
@@ -521,7 +521,7 @@
 
     warningEl.innerHTML = `
       <div class="ss-ad-header">
-        <strong>Silent Send detected potential PPI that may not be substituted:</strong>
+        <strong>Silent Send detected potential PII that may not be substituted:</strong>
         <button class="ss-ad-close">&times;</button>
       </div>
       ${items}
@@ -1180,7 +1180,7 @@
   }
 
   // ============================================================
-  // Pre-Send PPI Detection — scans as you type/paste (spellcheck style)
+  // Pre-Send PII Detection — scans as you type/paste (spellcheck style)
   // ============================================================
 
   // Generate obviously-fake values using reserved/standard ranges
@@ -1244,7 +1244,7 @@
 
     preSendWarningEl.innerHTML = `
       <div class="ss-ad-header">
-        <strong>Potential PPI detected — not yet configured:</strong>
+        <strong>Potential PII detected — not yet configured:</strong>
         <button class="ss-ad-close">&times;</button>
       </div>
       ${items}
@@ -1285,12 +1285,12 @@
         // Update local mappings so the fetch interceptor uses them immediately
         mappings = currentMappings;
 
-        // Replace the PPI value in the current input right now
+        // Replace the PII value in the current input right now
         if (inputEl) {
           replaceInInput(inputEl, real, fake);
-          // Re-scan — will dismiss warning if no more PPI remains
+          // Re-scan — will dismiss warning if no more PII remains
           if (inputScanTimer) clearTimeout(inputScanTimer);
-          inputScanTimer = setTimeout(() => scanInputForPPI(inputEl), 150);
+          inputScanTimer = setTimeout(() => scanInputForPII(inputEl), 150);
         }
 
         // Visual feedback
@@ -1346,14 +1346,14 @@
   // Scan input on type and paste
   let inputScanTimer = null;
 
-  function scanInputForPPI(target) {
+  function scanInputForPII(target) {
     const text = target.textContent || target.value || '';
     if (!text || text.length < 5) {
       if (preSendWarningEl) preSendWarningEl.classList.remove('visible');
       return;
     }
 
-    const warnings = autoDetectPPI(text, identity);
+    const warnings = autoDetectPII(text, identity);
     if (warnings.length > 0) {
       showPreSendWarning(warnings, target);
     } else if (preSendWarningEl) {
@@ -1367,7 +1367,7 @@
     if (target.matches?.('[contenteditable], textarea, input[type="text"]')) {
       // Debounce — don't scan on every keystroke
       if (inputScanTimer) clearTimeout(inputScanTimer);
-      inputScanTimer = setTimeout(() => scanInputForPPI(target), 800);
+      inputScanTimer = setTimeout(() => scanInputForPII(target), 800);
     }
   }, true);
 
@@ -1377,7 +1377,7 @@
     if (target.matches?.('[contenteditable], textarea, input[type="text"]') ||
         target.closest?.('[contenteditable]')) {
       // Scan shortly after paste completes
-      setTimeout(() => scanInputForPPI(target.closest?.('[contenteditable]') || target), 200);
+      setTimeout(() => scanInputForPII(target.closest?.('[contenteditable]') || target), 200);
     }
   }, true);
 

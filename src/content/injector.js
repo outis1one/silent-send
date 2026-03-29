@@ -118,8 +118,6 @@
         // Also log directly from the injector (content script world)
         // in case the background worker is asleep
         const replacements = event.data.replacements || [];
-        const settingsResult = await api.storage.local.get('ss_settings');
-        const maxLog = settingsResult.ss_settings?.maxLogEntries || 100;
         for (const r of replacements) {
           const log = (await api.storage.local.get('ss_activity_log')).ss_activity_log || [];
           log.unshift({
@@ -133,8 +131,8 @@
             pattern: r.pattern || '',
             url: location.href,
           });
-          // Trim to user-configured max
-          if (log.length > maxLog) log.length = maxLog;
+          // Trim
+          if (log.length > 200) log.length = 200;
           await api.storage.local.set({ ss_activity_log: log });
         }
       }
@@ -154,10 +152,7 @@
           const val = changes.ss_identity.newValue;
           if (!val?._ssLocalEncrypted) msg.identity = mergeProfiles(val);
         }
-        if (changes.ss_settings) {
-          const val = changes.ss_settings.newValue;
-          if (!val?._ssLocalEncrypted) msg.settings = val;
-        }
+        if (changes.ss_settings) msg.settings = changes.ss_settings.newValue;
 
         // Only post if we have something meaningful to send
         if (msg.mappings || msg.identity || msg.settings) {

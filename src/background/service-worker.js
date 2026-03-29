@@ -164,6 +164,17 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 const messageHandlers = {
+  async 'get:decrypted-config'(_message, _sender, sendResponse) {
+    try {
+      const mappings = await Storage.getMappings();
+      const identity = await Storage.getIdentity();
+      const settings = await Storage.getSettings();
+      sendResponse({ mappings, identity, settings });
+    } catch {
+      sendResponse(null);
+    }
+  },
+
   async 'substitution:performed'(message, sender) {
     const tabId = sender.tab?.id;
     if (tabId == null) return;

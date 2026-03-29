@@ -257,8 +257,8 @@ const DocumentScanner = {
 
         // Try to decompress if FlateDecode
         let content = streamData;
-        const filterMatch = str.slice(Math.max(0, match.index - 200), match.index)
-          .match(/\/Filter\s*\/FlateDecode/);
+        const dictSlice = str.slice(Math.max(0, match.index - 500), match.index);
+        const filterMatch = dictSlice.match(/\/Filter\s*(?:\/FlateDecode|\[\/FlateDecode\]|\[.*?\/FlateDecode.*?\])/);
 
         if (filterMatch) {
           try {

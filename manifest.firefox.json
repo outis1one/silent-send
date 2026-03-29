@@ -1,12 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Silent Send",
-  "version": "0.9.6",
+  "version": "0.9.7",
   "description": "Intercepts personal info and substitutes it with user-defined replacements before sending to AI services.",
   "browser_specific_settings": {
     "gecko": {
       "id": "silent-send@example.com",
-      "strict_min_version": "128.0"
+      "strict_min_version": "128.0",
+      "data_collection_permissions": {
+        "collect_user_data": false
+      }
     }
   },
   "permissions": [
@@ -113,8 +116,5 @@
       "resources": ["src/content/content.js", "src/content/early-hook.js"],
       "matches": ["<all_urls>"]
     }
-  ],
-  "data_collection_permissions": {
-    "collect_user_data": false
-  }
+  ]
 }

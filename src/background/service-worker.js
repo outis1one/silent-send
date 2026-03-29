@@ -21,7 +21,6 @@ const tabCounts = new Map();
 
 // Built-in URL patterns
 const BUILTIN_URL_PATTERNS = [
-  // AI services
   'https://claude.ai/*',
   'https://chatgpt.com/*',
   'https://chat.openai.com/*',
@@ -29,19 +28,6 @@ const BUILTIN_URL_PATTERNS = [
   'https://grok.x.ai/*',
   'https://x.com/i/grok*',
   'https://gemini.google.com/*',
-  'https://www.perplexity.ai/*',
-  'https://copilot.microsoft.com/*',
-  'https://chat.deepseek.com/*',
-  'https://huggingface.co/chat/*',
-  'https://poe.com/*',
-  // Developer & support sites
-  'https://github.com/*',
-  'https://gitlab.com/*',
-  'https://www.reddit.com/*',
-  'https://old.reddit.com/*',
-  'https://stackoverflow.com/*',
-  'https://pastebin.com/*',
-  // Local
   'http://localhost/*',
   'http://127.0.0.1/*',
 ];
@@ -76,44 +62,6 @@ api.tabs.onRemoved.addListener((tabId) => {
 
 // --- Dynamic injection for custom domains ---
 
-const DYNAMIC_SCRIPT_ID = 'ss-custom-domains';
-
-/**
- * Sync the dynamically registered content script with the current
- * custom domains list. Uses scripting.registerContentScripts so custom
- * domains inject at document_start (like built-in sites) and persist
- * across service worker restarts.
- */
-async function syncCustomDomainScripts() {
-  const settings = await Storage.getSettings();
-  const customDomains = settings.customDomains || [];
-
-  // Build match patterns from domains (e.g. "https://my-ai.com" → "https://my-ai.com/*")
-  const matches = customDomains.map(d => d.replace(/\/$/, '') + '/*');
-
-  try {
-    // Remove existing dynamic script first
-    await api.scripting.unregisterContentScripts({ ids: [DYNAMIC_SCRIPT_ID] }).catch(() => {});
-
-    if (matches.length > 0) {
-      await api.scripting.registerContentScripts([{
-        id: DYNAMIC_SCRIPT_ID,
-        matches,
-        js: ['src/content/injector.js'],
-        css: ['src/content/content.css'],
-        runAt: 'document_start',
-        allFrames: true,
-      }]);
-    }
-  } catch (e) {
-    console.warn('[Silent Send] Failed to register custom domain scripts:', e);
-  }
-}
-
-/**
- * Inject on an already-open tab for a newly added custom domain.
- * Only needed for tabs that were open before the content script was registered.
- */
 async function injectOnCustomDomain(tabId, tabUrl) {
   const settings = await Storage.getSettings();
   const customDomains = settings.customDomains || [];
@@ -164,17 +112,6 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 const messageHandlers = {
-  async 'get:decrypted-config'(_message, _sender, sendResponse) {
-    try {
-      const mappings = await Storage.getMappings();
-      const identity = await Storage.getIdentity();
-      const settings = await Storage.getSettings();
-      sendResponse({ mappings, identity, settings });
-    } catch {
-      sendResponse(null);
-    }
-  },
-
   async 'substitution:performed'(message, sender) {
     const tabId = sender.tab?.id;
     if (tabId == null) return;
@@ -437,11 +374,6 @@ api.storage.onChanged.addListener(async (changes, areaName) => {
     const settings = await Storage.getSettings();
     await updateIcon(settings);
 
-    // Re-register dynamic content scripts when custom domains change
-    if (changes.ss_settings && areaName === 'local') {
-      await syncCustomDomainScripts();
-    }
-
     // Push to browser.storage.sync when local data changes (same-browser cross-device)
     if (areaName === 'local' && settings.browserSync) {
       await SilentSendSync.pushToSyncStorage();
@@ -567,7 +499,6 @@ api.runtime.onInstalled.addListener(async () => {
   api.action.setBadgeBackgroundColor({ color: '#6b7280' });
   const settings = await Storage.getSettings();
   await updateIcon(settings);
-  await syncCustomDomainScripts();
   // Set up alarms on install
   await setupAutoSyncAlarm();
   await setupOrgPolicyAlarm();
@@ -577,7 +508,6 @@ api.runtime.onInstalled.addListener(async () => {
 (async () => {
   const settings = await Storage.getSettings();
   await updateIcon(settings);
-  await syncCustomDomainScripts();
 
   // Check if extension is locked (encrypted data, no cached key)
   const locked = await Storage.isLocked();

@@ -1,14 +1,14 @@
 /**
  * Silent Send - Auto-Detect
  *
- * Scans text for potential PII that the user hasn't configured.
- * This catches things the identity and auto-redact scanner can't —
+ * Scans text for potential PPI that the user hasn't configured.
+ * This catches things the identity and secret scanner can't —
  * because the user forgot or didn't know to configure them.
  *
  * Returns warnings (not auto-redactions) so the user can decide.
  */
 
-const PII_PATTERNS = [
+const PPI_PATTERNS = [
   // --- Network ---
   {
     name: 'Private IP Address',
@@ -21,7 +21,7 @@ const PII_PATTERNS = [
     regex: /\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b/g,
     category: 'network',
     hint: 'IP address — could identify your network',
-    // Exclude common non-PII IPs
+    // Exclude common non-PPI IPs
     exclude: /^(?:127\.0\.0\.1|0\.0\.0\.0|255\.255\.255\.\d+|8\.8\.[84]\.[84]|1\.1\.1\.1|1\.0\.0\.1)$/,
   },
   {
@@ -126,12 +126,12 @@ const PII_PATTERNS = [
   },
 ];
 
-// Context words that make ambiguous patterns more likely to be PII
+// Context words that make ambiguous patterns more likely to be PPI
 const CONTEXT_WORDS = /\b(?:born|birthday|dob|birth|passport|license|driver|ssn|social\s*security|address|home|live|lives|reside|zip|postal)\b/i;
 
 const AutoDetect = {
   /**
-   * Scan text for potential unconfigured PII.
+   * Scan text for potential unconfigured PPI.
    * Pass in identity so we can skip values the user already configured.
    *
    * Returns array of { name, value, hint, category, index }
@@ -167,7 +167,7 @@ const AutoDetect = {
       }
     }
 
-    for (const pattern of PII_PATTERNS) {
+    for (const pattern of PPI_PATTERNS) {
       // Skip context-dependent patterns if no context words present
       if (pattern.contextRequired && !hasContext) continue;
 
@@ -221,14 +221,15 @@ const AutoDetect = {
    */
   _detectProperNouns(text, configured) {
     const findings = [];
-    // Only match TWO OR MORE consecutive capitalized words
-    // Single capitalized words cause too many false positives (sentence starts)
-    const re = /\b([A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})+)\b/g;
+    const re = /(?:^|[.!?\n]\s*)?([A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})*)/g;
     let m;
 
     while ((m = re.exec(text)) !== null) {
       const fullMatch = m[1];
       if (!fullMatch) continue;
+
+      const before = text.slice(Math.max(0, m.index - 2), m.index);
+      const isSentenceStart = m.index === 0 || /[.!?\n]\s*$/.test(before);
 
       const words = fullMatch.split(/\s+/);
       const properWords = words.filter(w =>
@@ -237,14 +238,15 @@ const AutoDetect = {
         !configured.has(w.toLowerCase())
       );
 
-      if (properWords.length < 2) continue; // need at least 2 proper words
+      if (properWords.length === 0) continue;
+      if (isSentenceStart && properWords.length === 1 && words.length === 1) continue;
 
       const value = properWords.join(' ');
-      if (value.length >= 5 && !configured.has(value.toLowerCase())) {
+      if (value.length >= 3 && !configured.has(value.toLowerCase())) {
         findings.push({
           name: 'Possible Name/Org',
           value,
-          hint: 'Capitalized phrase — could be a name, company, or project',
+          hint: 'Capitalized word — could be a name, company, or project',
           category: 'name',
         });
       }
@@ -260,8 +262,6 @@ const AutoDetect = {
 };
 
 // Common English words to exclude from proper noun detection
-// Comprehensive list including verbs, nouns, adjectives that appear
-// in titles, headings, UI buttons, and instructions
 const COMMON_WORDS = new Set([
   'the', 'and', 'but', 'for', 'not', 'you', 'all', 'can', 'had', 'her',
   'was', 'one', 'our', 'out', 'are', 'has', 'his', 'how', 'its', 'may',
@@ -281,84 +281,6 @@ const COMMON_WORDS = new Set([
   'number', 'other', 'point', 'right', 'small', 'state', 'thing',
   'think', 'those', 'three', 'through', 'under', 'until', 'water',
   'world', 'write', 'might', 'should', 'because', 'although',
-  // Common verbs (titles, headings, buttons, instructions)
-  'generate', 'design', 'manage', 'process', 'handle', 'check', 'verify',
-  'submit', 'apply', 'accept', 'reject', 'approve', 'deny', 'confirm',
-  'cancel', 'delete', 'remove', 'edit', 'modify', 'view', 'display',
-  'search', 'filter', 'sort', 'select', 'choose', 'pick', 'enter',
-  'upload', 'download', 'install', 'enable', 'disable', 'activate',
-  'connect', 'disconnect', 'sync', 'refresh', 'reload', 'reset',
-  'save', 'load', 'store', 'restore', 'backup', 'copy', 'paste',
-  'lock', 'unlock', 'encrypt', 'decrypt', 'sign', 'register', 'login',
-  'logout', 'subscribe', 'share', 'publish', 'deploy', 'launch',
-  'merge', 'split', 'join', 'link', 'attach', 'insert', 'append',
-  'format', 'parse', 'convert', 'transform', 'translate', 'compile',
-  'execute', 'render', 'animate', 'validate', 'sanitize', 'escape',
-  'create', 'build', 'start', 'stop', 'open', 'close', 'run', 'send',
-  // Common nouns (titles, headings, labels)
-  'account', 'action', 'address', 'alert', 'analysis', 'application',
-  'area', 'article', 'asset', 'background', 'badge', 'banner', 'board',
-  'body', 'border', 'bottom', 'box', 'browser', 'buffer', 'button',
-  'cache', 'calendar', 'card', 'category', 'center', 'channel', 'chart',
-  'chat', 'child', 'choice', 'client', 'cloud', 'code', 'collection',
-  'color', 'column', 'command', 'comment', 'community', 'company',
-  'component', 'config', 'configuration', 'connection', 'console',
-  'contact', 'container', 'content', 'context', 'control', 'count',
-  'country', 'custom', 'dashboard', 'data', 'database', 'date', 'day',
-  'default', 'description', 'design', 'desktop', 'detail', 'device',
-  'dialog', 'directory', 'document', 'domain', 'draft', 'driver',
-  'edge', 'editor', 'element', 'email', 'engine', 'entry', 'environment',
-  'error', 'event', 'example', 'extension', 'feature', 'feedback',
-  'field', 'file', 'filter', 'folder', 'font', 'footer', 'form',
-  'frame', 'function', 'gallery', 'general', 'global', 'grid',
-  'guide', 'handler', 'header', 'health', 'help', 'history', 'home',
-  'host', 'icon', 'image', 'index', 'info', 'input', 'instance',
-  'interface', 'issue', 'item', 'job', 'key', 'label', 'language',
-  'layout', 'level', 'library', 'light', 'limit', 'line', 'link',
-  'list', 'local', 'location', 'log', 'logo', 'main', 'manager',
-  'manual', 'map', 'media', 'member', 'memory', 'menu', 'message',
-  'method', 'mobile', 'modal', 'mode', 'model', 'module', 'monitor',
-  'navigation', 'network', 'node', 'note', 'notification', 'object',
-  'option', 'order', 'origin', 'output', 'overlay', 'overview', 'owner',
-  'package', 'page', 'panel', 'parent', 'parser', 'password', 'path',
-  'pattern', 'permission', 'photo', 'pipeline', 'placeholder', 'plan',
-  'platform', 'player', 'plugin', 'point', 'policy', 'pool', 'popup',
-  'port', 'position', 'post', 'power', 'preview', 'primary', 'print',
-  'priority', 'process', 'product', 'profile', 'program', 'progress',
-  'project', 'prompt', 'property', 'protocol', 'provider', 'proxy',
-  'public', 'query', 'queue', 'quick', 'range', 'rate', 'reader',
-  'record', 'region', 'release', 'remote', 'report', 'request',
-  'resource', 'response', 'result', 'review', 'role', 'root', 'route',
-  'row', 'rule', 'runtime', 'sample', 'scanner', 'schema', 'scope',
-  'screen', 'script', 'search', 'section', 'security', 'select',
-  'sender', 'server', 'service', 'session', 'setting', 'settings',
-  'setup', 'share', 'shell', 'shortcut', 'sidebar', 'signal', 'simple',
-  'single', 'site', 'size', 'slider', 'snapshot', 'socket', 'solution',
-  'source', 'space', 'stage', 'standard', 'status', 'step', 'storage',
-  'stream', 'string', 'style', 'subject', 'success', 'summary',
-  'support', 'switch', 'symbol', 'syntax', 'system', 'table', 'target',
-  'task', 'team', 'template', 'terminal', 'test', 'text', 'theme',
-  'thread', 'title', 'token', 'tool', 'toolbar', 'tooltip', 'total',
-  'track', 'traffic', 'tree', 'trigger', 'type', 'unit', 'update',
-  'upload', 'user', 'utility', 'value', 'variable', 'version', 'video',
-  'view', 'virtual', 'warning', 'watch', 'web', 'widget', 'width',
-  'window', 'wizard', 'word', 'worker', 'workspace', 'wrapper', 'zone',
-  // Common adjectives
-  'active', 'advanced', 'available', 'basic', 'clean', 'clear', 'complete',
-  'connected', 'correct', 'critical', 'current', 'dark', 'deep',
-  'different', 'direct', 'double', 'dynamic', 'easy', 'empty', 'entire',
-  'exact', 'extra', 'fast', 'final', 'fixed', 'flat', 'free', 'fresh',
-  'full', 'generic', 'given', 'hidden', 'initial', 'inner', 'internal',
-  'invalid', 'latest', 'live', 'major', 'maximum', 'minimum', 'minor',
-  'mixed', 'modern', 'multiple', 'native', 'natural', 'nested', 'normal',
-  'online', 'optional', 'outer', 'overall', 'partial', 'pending', 'plain',
-  'popular', 'possible', 'previous', 'private', 'proper', 'protected',
-  'random', 'raw', 'ready', 'real', 'recent', 'related', 'relative',
-  'required', 'responsive', 'safe', 'secure', 'selected', 'sensitive',
-  'separate', 'shared', 'silent', 'similar', 'smart', 'smooth', 'solid',
-  'special', 'specific', 'stable', 'static', 'strict', 'strong',
-  'supported', 'unique', 'universal', 'unknown', 'upper', 'valid',
-  'various', 'visible', 'visual', 'whole', 'wide',
   // Programming / tech terms
   'string', 'number', 'boolean', 'object', 'array', 'function', 'class',
   'type', 'error', 'null', 'undefined', 'true', 'false', 'return',

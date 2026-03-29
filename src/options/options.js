@@ -14,23 +14,17 @@ let passwordsRevealed = false;
 
 const $ = (sel) => document.querySelector(sel);
 
-// --- Safe innerHTML replacement (AMO-compliant) ---
-function safeHTML(el, html) {
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  el.replaceChildren(...Array.from(doc.body.childNodes));
-}
-
 document.addEventListener('DOMContentLoaded', async () => {
   mappings = await Storage.getMappings();
   settings = await Storage.getSettings();
 
   // Apply settings to UI
   $('#showHighlights').checked = settings.showHighlights || false;
-  $('#autoRedactToggle').checked = settings.autoRedact !== false;
+  $('#secretScanning').checked = settings.secretScanning !== false;
   $('#autoDetect').checked = settings.autoDetect !== false;
   $('#autoRedactDetected').checked = settings.autoRedactDetected !== false;
   $('#autoAddDetected').checked = settings.autoAddDetected !== false;
-  $('#maxLogEntries').value = settings.maxLogEntries || 100;
+  $('#maxLogEntries').value = settings.maxLogEntries || 200;
   $('#browserSync').checked = settings.browserSync === true;
 
   renderMappings();
@@ -51,28 +45,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // --- Sync section ---
   $('#browserSync').addEventListener('change', async (e) => {
+    await Storage.saveSettings({ browserSync: e.target.checked });
     if (e.target.checked) {
-      const encEnabled = await SilentSendSync.isEncryptionEnabled();
-      if (!encEnabled) {
-        e.target.checked = false;
-        setSyncStatus('Encryption must be enabled before syncing. Set up encryption first.', 'error');
-        return;
-      }
-      await Storage.saveSettings({ browserSync: true });
       await SilentSendSync.pushToSyncStorage();
       setSyncStatus('Browser account sync enabled. Your settings will sync automatically.', 'ok');
     } else {
-      await Storage.saveSettings({ browserSync: false });
       setSyncStatus('Browser account sync disabled.', 'neutral');
     }
   });
 
   $('#btnGenerateSyncCode').addEventListener('click', async () => {
     const code = await SilentSendSync.exportSyncCode();
-    if (code?.needsEncryption) {
-      setSyncStatus('Encryption must be enabled before syncing. Set up encryption first.', 'error');
-      return;
-    }
     if (code?.needsAuth) {
       setSyncStatus('Authentication required to encrypt sync code.', 'warn');
       showSyncAuthPrompt();
@@ -185,9 +168,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!token) { setGistSyncStatus('Enter your GitHub PAT first.', 'warn'); return; }
     setGistSyncStatus('Pushing…', 'neutral');
     const r = await SilentSendSync.pushToGist(token);
-    if (r.needsEncryption) {
-      setGistSyncStatus('Encryption must be enabled before syncing.', 'error');
-    } else if (r.needsAuth) {
+    if (r.needsAuth) {
       setGistSyncStatus('Authentication required to encrypt.', 'warn');
       showSyncAuthPrompt();
     } else if (r.success) {
@@ -226,9 +207,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const headers = parseHeadersField($('#customSyncHeaders').value);
     setUrlSyncStatus('Pushing…', 'neutral');
     const r = await SilentSendSync.pushToUrl({ url, headers });
-    if (r.needsEncryption) {
-      setUrlSyncStatus('Encryption must be enabled before syncing.', 'error');
-    } else if (r.needsAuth) {
+    if (r.needsAuth) {
       setUrlSyncStatus('Authentication required to encrypt.', 'warn');
       showSyncAuthPrompt();
     } else if (r.success) {
@@ -280,34 +259,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('#newDomain').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') addDomain();
   });
-  renderSuggestedDomains();
-
-  // Bulk add domains
-  $('#btnBulkAddDomains').addEventListener('click', () => {
-    const section = $('#bulkDomainSection');
-    section.style.display = section.style.display === 'none' ? 'block' : 'none';
-  });
-  $('#btnCancelBulkDomains').addEventListener('click', () => {
-    $('#bulkDomainSection').style.display = 'none';
-    $('#bulkDomainText').value = '';
-    $('#bulkDomainStatus').textContent = '';
-  });
-  $('#btnApplyBulkDomains').addEventListener('click', bulkAddDomains);
 
   // Settings listeners
   $('#showHighlights').addEventListener('change', async (e) => {
     await Storage.saveSettings({ showHighlights: e.target.checked });
   });
 
-  $('#autoRedactToggle').addEventListener('change', async (e) => {
-    await Storage.saveSettings({ autoRedact: e.target.checked });
-  });
-
-  // Custom redact patterns
-  renderCustomRedactPatterns();
-  $('#btnAddRedactPattern').addEventListener('click', addCustomRedactPattern);
-  $('#newRedactPattern').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') addCustomRedactPattern();
+  $('#secretScanning').addEventListener('change', async (e) => {
+    await Storage.saveSettings({ secretScanning: e.target.checked });
   });
 
   $('#autoDetect').addEventListener('change', async (e) => {
@@ -323,7 +282,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   $('#maxLogEntries').addEventListener('change', async (e) => {
-    await Storage.saveSettings({ maxLogEntries: parseInt(e.target.value, 10) || 100 });
+    await Storage.saveSettings({ maxLogEntries: parseInt(e.target.value, 10) || 200 });
   });
 
   // Add mapping
@@ -452,11 +411,11 @@ function renderMappings() {
   const nonPasswordMappings = mappings.filter(m => m.category !== 'password');
 
   if (nonPasswordMappings.length === 0) {
-    safeHTML(tbody, '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:24px">No mappings configured</td></tr>');
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:24px">No mappings configured</td></tr>';
     return;
   }
 
-  safeHTML(tbody, nonPasswordMappings
+  tbody.innerHTML = nonPasswordMappings
     .map(
       (m) => `
     <tr data-id="${m.id}">
@@ -474,7 +433,7 @@ function renderMappings() {
     </tr>
   `
     )
-    .join(''));
+    .join('');
 
   // Bind
   tbody.querySelectorAll('.btn-delete').forEach((btn) => {
@@ -504,14 +463,14 @@ function renderPasswords() {
   const noMsg = $('#noPasswordsMsg');
 
   if (passwordMappings.length === 0) {
-    tbody.replaceChildren();
+    tbody.innerHTML = '';
     noMsg.style.display = 'block';
     return;
   }
 
   noMsg.style.display = 'none';
 
-  safeHTML(tbody, passwordMappings.map(m => {
+  tbody.innerHTML = passwordMappings.map(m => {
     const displayReal = passwordsRevealed
       ? escapeHtml(m.real)
       : '&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;';
@@ -528,7 +487,7 @@ function renderPasswords() {
       </td>
       <td><button class="btn btn-sm btn-danger btn-delete-pw">&times;</button></td>
     </tr>`;
-  }).join(''));
+  }).join('');
 
   // Bind delete
   tbody.querySelectorAll('.btn-delete-pw').forEach(btn => {
@@ -565,11 +524,11 @@ async function renderLog() {
 
   const list = $('#logList');
   if (log.length === 0) {
-    safeHTML(list, '<div style="text-align:center;color:#9ca3af;padding:24px">No activity logged</div>');
+    list.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:24px">No activity logged</div>';
     return;
   }
 
-  safeHTML(list, log
+  list.innerHTML = log
     .slice(0, 100)
     .map((entry) => {
       const time = new Date(entry.timestamp).toLocaleString();
@@ -582,121 +541,46 @@ async function renderLog() {
       </div>
     `;
     })
-    .join(''));
+    .join('');
 }
 
 // --- Custom Domains ---
+async function addDomain() {
+  let domain = $('#newDomain').value.trim();
+  if (!domain) return;
 
-// Suggested popular domains (not already built-in)
-const SUGGESTED_DOMAINS = [
-  { label: 'OpenWebUI', url: 'https://openwebui.local' },
-  { label: 'Ollama Web', url: 'http://localhost:3000' },
-  { label: 'text-generation-webui', url: 'http://localhost:7860' },
-  { label: 'Jan.ai', url: 'https://jan.ai' },
-  { label: 'You.com', url: 'https://you.com' },
-  { label: 'Phind', url: 'https://www.phind.com' },
-  { label: 'Cohere', url: 'https://coral.cohere.com' },
-  { label: 'Mistral', url: 'https://chat.mistral.ai' },
-  { label: 'Pi AI', url: 'https://pi.ai' },
-  { label: 'Notion AI', url: 'https://www.notion.so' },
-  { label: 'Quora', url: 'https://www.quora.com' },
-  { label: 'Discord', url: 'https://discord.com' },
-  { label: 'Slack', url: 'https://app.slack.com' },
-  { label: 'Jira', url: 'https://atlassian.net' },
-  { label: 'Linear', url: 'https://linear.app' },
-  { label: 'Bitbucket', url: 'https://bitbucket.org' },
-];
-
-function normalizeDomain(raw) {
-  let domain = raw.trim();
-  if (!domain) return null;
+  // Normalize: ensure it has a protocol
   if (!domain.startsWith('http://') && !domain.startsWith('https://')) {
     domain = 'https://' + domain;
   }
-  return domain.replace(/\/+$/, '');
-}
+  // Strip trailing slashes
+  domain = domain.replace(/\/+$/, '');
 
-async function addSingleDomain(domain) {
   const domains = settings.customDomains || [];
-  if (domains.includes(domain)) return { added: false, reason: 'duplicate' };
+  if (domains.includes(domain)) {
+    alert('Domain already added.');
+    return;
+  }
 
+  // Request browser permission for this domain
   try {
-    const granted = await api.permissions.request({ origins: [domain + '/*'] });
-    if (!granted) return { added: false, reason: 'denied' };
+    const granted = await api.permissions.request({
+      origins: [domain + '/*'],
+    });
+    if (!granted) {
+      alert('Permission denied. The extension needs access to this domain to work.');
+      return;
+    }
   } catch (e) {
+    // Firefox or older Chrome may not support optional permissions this way
     console.warn('[Silent Send] Could not request permission:', e);
   }
 
   domains.push(domain);
   settings.customDomains = domains;
   await Storage.saveSettings({ customDomains: domains });
-  return { added: true };
-}
-
-async function addDomain() {
-  const domain = normalizeDomain($('#newDomain').value);
-  if (!domain) return;
-
-  const result = await addSingleDomain(domain);
-  if (!result.added) {
-    if (result.reason === 'duplicate') alert('Domain already added.');
-    else alert('Permission denied. The extension needs access to this domain to work.');
-    return;
-  }
-
   renderDomains();
-  renderSuggestedDomains();
   $('#newDomain').value = '';
-}
-
-async function bulkAddDomains() {
-  const text = $('#bulkDomainText').value;
-  const lines = text.split(/[\n,]+/).map(l => l.trim()).filter(Boolean);
-  if (lines.length === 0) return;
-
-  let added = 0, skipped = 0;
-  for (const line of lines) {
-    const domain = normalizeDomain(line);
-    if (!domain) { skipped++; continue; }
-    const result = await addSingleDomain(domain);
-    if (result.added) added++;
-    else skipped++;
-  }
-
-  renderDomains();
-  renderSuggestedDomains();
-  $('#bulkDomainStatus').textContent = `Added ${added}, skipped ${skipped}`;
-  if (added > 0) $('#bulkDomainText').value = '';
-}
-
-function renderSuggestedDomains() {
-  const container = $('#suggestedDomains');
-  if (!container) return;
-  const domains = settings.customDomains || [];
-
-  // Filter out suggestions that are already added
-  const available = SUGGESTED_DOMAINS.filter(s => !domains.includes(s.url));
-  if (available.length === 0) {
-    safeHTML(container, '<span style="font-size:11px;color:#9ca3af">All suggestions added!</span>');
-    return;
-  }
-
-  safeHTML(container, available.map(s =>
-    `<button class="btn-suggest-domain" data-url="${escapeHtml(s.url)}" title="${escapeHtml(s.url)}" style="font-size:11px;padding:3px 8px;border:1px solid #d1d5db;border-radius:12px;background:#fff;cursor:pointer;color:#374151;white-space:nowrap">+ ${escapeHtml(s.label)}</button>`
-  ).join(''));
-
-  container.querySelectorAll('.btn-suggest-domain').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const domain = btn.dataset.url;
-      const result = await addSingleDomain(domain);
-      if (result.added) {
-        renderDomains();
-        renderSuggestedDomains();
-      } else if (result.reason === 'denied') {
-        alert('Permission denied for ' + domain);
-      }
-    });
-  });
 }
 
 function renderDomains() {
@@ -704,193 +588,27 @@ function renderDomains() {
   const domains = settings.customDomains || [];
 
   if (domains.length === 0) {
-    safeHTML(list, '<div style="text-align:center;color:#9ca3af;padding:12px;font-size:13px">No custom domains. Built-in sites (Claude, ChatGPT, Gemini, Grok, Perplexity, Copilot, DeepSeek, HuggingChat, Poe, GitHub, GitLab, Reddit, Stack Overflow, Pastebin, localhost) are always active.</div>');
+    list.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:12px;font-size:13px">No custom domains. Built-in sites (Claude, ChatGPT, Grok, Gemini, localhost) are always active.</div>';
     return;
   }
 
-  safeHTML(list, domains
+  list.innerHTML = domains
     .map((d, i) => `
       <div class="domain-item" style="display:flex;align-items:center;justify-content:space-between;padding:8px;background:#f9fafb;border-radius:6px;margin-bottom:4px">
-        <span class="domain-text" style="font-size:13px;font-family:monospace;flex:1;overflow:hidden;text-overflow:ellipsis">${escapeHtml(d)}</span>
-        <div style="display:flex;gap:4px;margin-left:8px">
-          <button class="btn btn-sm btn-edit-domain" data-index="${i}" title="Edit">&#9998;</button>
-          <button class="btn btn-sm btn-danger btn-remove-domain" data-index="${i}" title="Remove">&times;</button>
-        </div>
+        <span style="font-size:13px;font-family:monospace">${escapeHtml(d)}</span>
+        <button class="btn btn-sm btn-danger btn-remove-domain" data-index="${i}">&times;</button>
       </div>
     `)
-    .join(''));
+    .join('');
 
-  // Edit handlers
-  list.querySelectorAll('.btn-edit-domain').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const idx = parseInt(btn.dataset.index, 10);
-      const domains = settings.customDomains || [];
-      const current = domains[idx];
-      const row = btn.closest('.domain-item');
-      const textEl = row.querySelector('.domain-text');
-
-      // Replace text with input
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.value = current;
-      input.style.cssText = 'flex:1;font-size:12px;font-family:monospace;padding:3px 6px;border:1px solid #3b82f6;border-radius:4px;outline:none;min-width:0';
-      textEl.replaceWith(input);
-      input.focus();
-      input.select();
-
-      // Replace edit button with save button
-      btn.textContent = '\u2713';
-      btn.title = 'Save';
-      btn.style.color = '#10b981';
-
-      const save = async () => {
-        const newDomain = normalizeDomain(input.value);
-        if (!newDomain || newDomain === current) {
-          renderDomains();
-          return;
-        }
-
-        if (domains.includes(newDomain)) {
-          alert('Domain already exists.');
-          renderDomains();
-          return;
-        }
-
-        // Request permission for new domain
-        try {
-          const granted = await api.permissions.request({ origins: [newDomain + '/*'] });
-          if (!granted) {
-            alert('Permission denied for ' + newDomain);
-            renderDomains();
-            return;
-          }
-        } catch (e) { /* non-fatal */ }
-
-        // Revoke old permission
-        try {
-          await api.permissions.remove({ origins: [current + '/*'] });
-        } catch (e) { /* non-fatal */ }
-
-        domains[idx] = newDomain;
-        settings.customDomains = domains;
-        await Storage.saveSettings({ customDomains: domains });
-        renderDomains();
-        renderSuggestedDomains();
-      };
-
-      btn.onclick = save;
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') save();
-        if (e.key === 'Escape') renderDomains();
-      });
-      input.addEventListener('blur', () => {
-        // Small delay to allow button click to fire first
-        setTimeout(() => { if (document.contains(input)) renderDomains(); }, 150);
-      });
-    });
-  });
-
-  // Remove handlers
   list.querySelectorAll('.btn-remove-domain').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const idx = parseInt(btn.dataset.index, 10);
       const domains = settings.customDomains || [];
-      const removed = domains.splice(idx, 1)[0];
+      domains.splice(idx, 1);
       settings.customDomains = domains;
       await Storage.saveSettings({ customDomains: domains });
-
-      if (removed) {
-        try {
-          await api.permissions.remove({ origins: [removed + '/*'] });
-        } catch (e) { /* non-fatal */ }
-      }
-
       renderDomains();
-      renderSuggestedDomains();
-    });
-  });
-}
-
-// --- Custom Redact Patterns ---
-
-function addCustomRedactPattern() {
-  const name = $('#newRedactName').value.trim();
-  const pattern = $('#newRedactPattern').value.trim();
-  const redact = $('#newRedactReplacement').value.trim();
-
-  if (!pattern) { alert('Pattern is required.'); return; }
-
-  // Validate regex
-  try {
-    new RegExp(pattern, 'g');
-  } catch (e) {
-    alert('Invalid regex: ' + e.message);
-    return;
-  }
-
-  const label = name || 'Custom Pattern';
-  const replacement = redact || `[REDACTED-${label.toUpperCase().replace(/\s+/g, '-')}]`;
-
-  const patterns = settings.customRedactPatterns || [];
-  patterns.push({
-    id: crypto.randomUUID(),
-    name: label,
-    pattern,
-    redact: replacement,
-    enabled: true,
-  });
-
-  settings.customRedactPatterns = patterns;
-  Storage.saveSettings({ customRedactPatterns: patterns });
-  renderCustomRedactPatterns();
-
-  $('#newRedactName').value = '';
-  $('#newRedactPattern').value = '';
-  $('#newRedactReplacement').value = '';
-}
-
-function renderCustomRedactPatterns() {
-  const list = $('#customRedactList');
-  if (!list) return;
-  const patterns = settings.customRedactPatterns || [];
-
-  if (patterns.length === 0) {
-    safeHTML(list, '<div style="font-size:12px;color:#9ca3af;padding:6px 0">No custom patterns defined. Built-in patterns cover common API keys, tokens, and credentials.</div>');
-    return;
-  }
-
-  safeHTML(list, patterns.map((p, i) => `
-    <div style="display:flex;align-items:center;gap:6px;padding:6px 8px;background:#fff;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:4px;flex-wrap:wrap">
-      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;min-width:0">
-        <input type="checkbox" class="redact-toggle" data-index="${i}" ${p.enabled ? 'checked' : ''}>
-      </label>
-      <span style="font-size:12px;font-weight:500;white-space:nowrap">${escapeHtml(p.name)}</span>
-      <code style="font-size:11px;color:#6b7280;background:#f3f4f6;padding:1px 5px;border-radius:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:250px" title="${escapeHtml(p.pattern)}">${escapeHtml(p.pattern)}</code>
-      <span style="font-size:11px;color:#9ca3af;margin-left:auto;white-space:nowrap">&rarr; ${escapeHtml(p.redact)}</span>
-      <button class="btn btn-sm btn-danger btn-remove-redact" data-index="${i}" style="padding:2px 6px">&times;</button>
-    </div>
-  `).join(''));
-
-  // Toggle handlers
-  list.querySelectorAll('.redact-toggle').forEach(toggle => {
-    toggle.addEventListener('change', async () => {
-      const idx = parseInt(toggle.dataset.index, 10);
-      const patterns = settings.customRedactPatterns || [];
-      patterns[idx].enabled = toggle.checked;
-      settings.customRedactPatterns = patterns;
-      await Storage.saveSettings({ customRedactPatterns: patterns });
-    });
-  });
-
-  // Remove handlers
-  list.querySelectorAll('.btn-remove-redact').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const idx = parseInt(btn.dataset.index, 10);
-      const patterns = settings.customRedactPatterns || [];
-      patterns.splice(idx, 1);
-      settings.customRedactPatterns = patterns;
-      await Storage.saveSettings({ customRedactPatterns: patterns });
-      renderCustomRedactPatterns();
     });
   });
 }
@@ -1241,9 +959,8 @@ async function initSyncEncryptionUI() {
   $('#btnDisableEncryption').addEventListener('click', async () => {
     if (!window.confirm('Disable sync encryption? Existing encrypted sync data will become unreadable.')) return;
     await SilentSendSync.disableEncryption();
-    $('#browserSync').checked = false;
     showEncryptionNotConfigured();
-    setSyncEncStatus('Encryption disabled. All sync channels have been turned off.', 'neutral');
+    setSyncEncStatus('Encryption disabled.', 'neutral');
   });
 
   // Change password
@@ -1578,11 +1295,11 @@ async function renderVersionHistory() {
   const snapshots = await VersionHistory.getSnapshots();
 
   if (snapshots.length === 0) {
-    safeHTML(list, '<div style="text-align:center;color:#9ca3af;padding:12px">No snapshots yet. Snapshots are created on each sync.</div>');
+    list.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:12px">No snapshots yet. Snapshots are created on each sync.</div>';
     return;
   }
 
-  safeHTML(list, snapshots.map(s => {
+  list.innerHTML = snapshots.map(s => {
     const time = new Date(s.timestamp).toLocaleString();
     const mappingCount = (s.data?.mappings || []).length;
     return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px;background:#f9fafb;border-radius:6px;margin-bottom:4px">
@@ -1593,7 +1310,7 @@ async function renderVersionHistory() {
       </div>
       <button class="btn btn-sm btn-restore-snapshot" data-id="${s.id}">Restore</button>
     </div>`;
-  }).join(''));
+  }).join('');
 
   list.querySelectorAll('.btn-restore-snapshot').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -1638,13 +1355,13 @@ async function renderDevices() {
   const entries = Object.values(devices);
 
   if (entries.length === 0) {
-    safeHTML(list, '<div style="text-align:center;color:#9ca3af;padding:12px">No devices synced yet. Push or pull to register this device.</div>');
+    list.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:12px">No devices synced yet. Push or pull to register this device.</div>';
     return;
   }
 
   entries.sort((a, b) => (b.lastSync || 0) - (a.lastSync || 0));
 
-  safeHTML(list, `<table style="width:100%;font-size:12px;border-collapse:collapse">
+  list.innerHTML = `<table style="width:100%;font-size:12px;border-collapse:collapse">
     <thead><tr style="text-align:left;border-bottom:1px solid #e5e7eb">
       <th style="padding:6px">Device</th>
       <th style="padding:6px">Browser</th>
@@ -1661,7 +1378,7 @@ async function renderDevices() {
         <td style="padding:6px">${!isCurrent ? `<button class="btn btn-sm btn-danger btn-remove-device" data-id="${d.id}">&times;</button>` : ''}</td>
       </tr>`;
     }).join('')}</tbody>
-  </table>`);
+  </table>`;
 
   list.querySelectorAll('.btn-remove-device').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -1738,9 +1455,9 @@ async function showOrgJoined() {
   const compliance = await OrgPolicy.checkCompliance();
   const statusEl = $('#orgComplianceStatus');
   if (compliance.compliant) {
-    safeHTML(statusEl, '<span style="color:#10b981">&#10003; Compliant — all required fields configured</span>');
+    statusEl.innerHTML = '<span style="color:#10b981">&#10003; Compliant — all required fields configured</span>';
   } else {
-    safeHTML(statusEl, `<span style="color:#b45309">Missing: ${compliance.missing.join(', ')}</span>`);
+    statusEl.innerHTML = `<span style="color:#b45309">Missing: ${compliance.missing.join(', ')}</span>`;
   }
 
   const reqMappings = policy?.requiredMappings || [];
@@ -1892,7 +1609,7 @@ async function checkConflicts() {
 
 function renderConflicts(conflicts) {
   const list = $('#conflictList');
-  safeHTML(list, conflicts.map(c => `
+  list.innerHTML = conflicts.map(c => `
     <div style="padding:10px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;margin-bottom:8px" data-conflict-id="${c.id}">
       <div style="font-size:12px;font-weight:500;margin-bottom:6px">${escapeHtml(c.path)}</div>
       <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px">
@@ -1910,7 +1627,7 @@ function renderConflicts(conflicts) {
         <button class="btn btn-sm btn-resolve" data-id="${c.id}" data-choice="remote">Keep Remote</button>
       </div>
     </div>
-  `).join(''));
+  `).join('');
 
   list.querySelectorAll('.btn-resolve').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -1971,10 +1688,10 @@ async function handleBulkImport(e) {
       result.identity.usernames.filter(u => !u.substitute).length +
       result.identity.phones.filter(p => !p.substitute).length;
 
-    safeHTML($('#bulkImportSummary'), `
+    $('#bulkImportSummary').innerHTML = `
       Found: ${parts.join(', ')}.
       ${needsMapping > 0 ? `<span style="color:#b45309">${needsMapping} item(s) need substitutes — you can add them after import.</span>` : ''}
-    `);
+    `;
 
     // Build preview list
     const items = [];
@@ -1994,8 +1711,8 @@ async function handleBulkImport(e) {
       items.push(`<div><span style="color:#6b7280">${escapeHtml(m.category)}:</span> <strong>${escapeHtml(m.real)}</strong>${m.substitute ? ' → ' + escapeHtml(m.substitute) : ' <span style="color:#b45309">needs substitute</span>'}</div>`);
     }
 
-    safeHTML($('#bulkImportItems'), items.slice(0, 50).join('') +
-      (items.length > 50 ? `<div style="color:#6b7280;margin-top:4px">+${items.length - 50} more...</div>` : ''));
+    $('#bulkImportItems').innerHTML = items.slice(0, 50).join('') +
+      (items.length > 50 ? `<div style="color:#6b7280;margin-top:4px">+${items.length - 50} more...</div>` : '');
 
     $('#bulkImportPreview').style.display = 'block';
 

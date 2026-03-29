@@ -1687,6 +1687,8 @@
 
   // Reveal ALL text on the page + apply highlights
   function revealAllResponses() {
+    const pairs = getRevealPairs();
+    console.log('[Silent Send] revealAllResponses — pairs:', pairs.length, pairs.map(p => `"${p.from}" → "${p.to}"`));
     revealInElement(document.body);
     highlightMatches(document.body);
   }

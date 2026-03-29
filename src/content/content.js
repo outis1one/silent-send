@@ -1404,13 +1404,17 @@
   // session, preventing false positives (e.g. "user" in AI prose).
   function buildRevealPairs() {
     const pairs = [];
+    const added = new Set();
 
     // Helper: only add if this substitute was actually sent
     function addIfUsed(from, to, caseSensitive) {
       if (!from || !to) return;
-      const entry = sessionSubstitutions.get(from.toLowerCase());
+      const key = from.toLowerCase();
+      if (added.has(key)) return;
+      const entry = sessionSubstitutions.get(key);
       if (entry) {
         pairs.push({ from, to, caseSensitive });
+        added.add(key);
       }
     }
 
@@ -1423,9 +1427,9 @@
       for (const e of (identity.emails || [])) {
         addIfUsed(e.substitute, e.real);
       }
-      for (const n of (identity.names || [])) {
-        addIfUsed(n.substitute, n.real);
-      }
+      // For names: DON'T add individual first/last — the smart pattern engine
+      // combines them (e.g. "Ademo Demo" for "John Smith"). The catch-all
+      // below picks up the combined form from sessionSubstitutions.
       for (const u of (identity.usernames || [])) {
         addIfUsed(u.substitute, u.real);
       }
@@ -1437,10 +1441,13 @@
       }
     }
 
-    // Also add auto-detect and auto-redact substitutions from this session
+    // Catch-all: add any session substitution not already covered above.
+    // This picks up combined names ("Ademo Demo" → "John Smith"),
+    // auto-detected PII, and auto-redacted secrets.
     for (const [key, entry] of sessionSubstitutions) {
-      if (!pairs.some(p => p.from.toLowerCase() === key)) {
+      if (!added.has(key)) {
         pairs.push({ from: entry.replaced, to: entry.original });
+        added.add(key);
       }
     }
 
@@ -1448,11 +1455,13 @@
     return pairs;
   }
 
-  // Cache — invalidate when config changes or new substitutions happen
+  // Cache — invalidate when identity/mappings change or new substitutions happen
+  // Settings-only updates (e.g. reveal toggle) do NOT invalidate
   let _revealPairsCache = null;
-  let _revealPairsCacheSize = 0;
   window.addEventListener('message', (event) => {
-    if (event.data?.type === 'ss:config-updated') _revealPairsCache = null;
+    if (event.data?.type === 'ss:config-updated') {
+      if (event.data.mappings || event.data.identity) _revealPairsCache = null;
+    }
     if (event.data?.type === 'ss:substitution-performed') _revealPairsCache = null;
   });
 

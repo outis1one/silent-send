@@ -12,7 +12,7 @@
  * - Policy updates are applied automatically
  *
  * Privacy: the org admin can check compliance (are required fields
- * configured?) but CANNOT see individual PII values.
+ * configured?) but CANNOT see individual PPI values.
  */
 
 import api from './browser-polyfill.js';
@@ -198,11 +198,11 @@ const OrgPolicy = {
   },
 
   /**
-   * Get org-required auto-redact patterns.
+   * Get org-required secret scanner patterns.
    *
-   * @returns {Array} additional patterns to add to auto-redact
+   * @returns {Array} additional patterns to add to the secret scanner
    */
-  async getOrgRedactPatterns() {
+  async getOrgSecretPatterns() {
     const policy = await this.getPolicy();
     if (!policy?.requiredSecretPatterns?.length) return [];
 
@@ -220,7 +220,7 @@ const OrgPolicy = {
 
   /**
    * Check if the user's configuration meets org policy requirements.
-   * Returns compliance status WITHOUT revealing actual PII values.
+   * Returns compliance status WITHOUT revealing actual PPI values.
    *
    * @returns {{ compliant: boolean, missing: string[], configured: string[] }}
    */

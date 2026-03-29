@@ -10,14 +10,6 @@
 (function () {
   'use strict';
 
-  // --- Safe innerHTML replacement (AMO-compliant, page world) ---
-  function safeHTML(el, html) {
-    const template = document.createElement('template');
-    template.innerHTML = html;
-    // Convert to static array — childNodes is live and shrinks as nodes move
-    el.replaceChildren(...Array.from(template.content.childNodes));
-  }
-
   // ============================================================
   // Load config from the injector script's data attribute
   // ============================================================
@@ -26,13 +18,12 @@
   let settings = { enabled: true, revealMode: false, showHighlights: false };
 
   try {
-    const configEl = document.getElementById('ss-config-data');
+    const configEl = document.querySelector('script[data-ss-config]');
     if (configEl) {
-      const config = JSON.parse(configEl.textContent);
+      const config = JSON.parse(configEl.getAttribute('data-ss-config'));
       mappings = config.mappings || [];
       identity = config.identity || {};
       settings = { ...settings, ...(config.settings || {}) };
-      configEl.remove(); // clean up
     }
   } catch (e) {
     console.warn('[Silent Send] Failed to parse initial config:', e);
@@ -183,32 +174,6 @@
             replacements.push({ original: matched, replaced: sub, category: 'name', pattern: 'smart' });
             return sub;
           });
-          // Concatenated forms: JohnSmith, johnsmith, john.smith, john_smith, john-smith
-          // Also reversed: SmithJohn, smithjohn, smith.john, etc.
-          const f = first.real, l = last.real;
-          const fs = first.substitute, ls = last.substitute;
-          const concatPatterns = [
-            // first+last
-            [f + l, fs + ls],
-            [f + '.' + l, fs + '.' + ls],
-            [f + '_' + l, fs + '_' + ls],
-            [f + '-' + l, fs + '-' + ls],
-            // last+first
-            [l + f, ls + fs],
-            [l + '.' + f, ls + '.' + fs],
-            [l + '_' + f, ls + '_' + fs],
-            [l + '-' + f, ls + '-' + fs],
-          ];
-          for (const [real, sub] of concatPatterns) {
-            result = result.replace(new RegExp('\\b' + esc(real) + '\\b', 'gi'), (matched) => {
-              // Preserve case: all-lower→lower, ALL-UPPER→upper, else use sub as-is
-              let replacement = sub;
-              if (matched === matched.toLowerCase()) replacement = sub.toLowerCase();
-              else if (matched === matched.toUpperCase()) replacement = sub.toUpperCase();
-              replacements.push({ original: matched, replaced: replacement, category: 'name', pattern: 'smart-concat' });
-              return replacement;
-            });
-          }
         }
       }
 
@@ -289,7 +254,7 @@
 
   // ============================================================
   // Combined substitution: smart patterns + explicit + secret scan
-  // + auto-detect warning for unconfigured PII
+  // + auto-detect warning for unconfigured PPI
   // ============================================================
   function substituteAll(text) {
     const allReplacements = [];
@@ -304,18 +269,18 @@
 
     // 3. Secret scanner (API keys, tokens, SSNs, credit cards, etc.)
     let finalText = explicit.text;
-    if (settings.autoRedact !== false) {
-      const secrets = runAutoRedact(finalText);
+    if (settings.secretScanning !== false) {
+      const secrets = scanAndRedactSecrets(finalText);
       allReplacements.push(...secrets.redactions);
       finalText = secrets.text;
     }
 
-    // 4. Auto-detect: scan the FINAL text for unconfigured PII
+    // 4. Auto-detect: scan the FINAL text for unconfigured PPI
     //    Auto-redact if enabled, otherwise just warn
     if (settings.autoDetect !== false) {
-      const warnings = autoDetectPII(finalText, identity);
+      const warnings = autoDetectPPI(finalText, identity);
       if (warnings.length > 0) {
-        // Auto-redact detected PII in the outbound text
+        // Auto-redact detected PPI in the outbound text
         if (settings.autoRedactDetected !== false) {
           for (let i = warnings.length - 1; i >= 0; i--) {
             const w = warnings[i];
@@ -344,9 +309,9 @@
   }
 
   // ============================================================
-  // Auto-Detect PII Scanner (inline for page world)
+  // Auto-Detect PPI Scanner (inline for page world)
   // ============================================================
-  const PII_PATTERNS = [
+  const PPI_PATTERNS = [
     // Network
     { name: 'Private IP', re: /\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})\b/g,
       hint: 'Private IP address', cat: 'network' },
@@ -383,26 +348,17 @@
 
   // Common English words that are capitalized but aren't proper nouns.
   // Used by the proper noun heuristic to reduce false positives.
-  // Includes common verbs, nouns, adjectives that appear in titles,
-  // headings, UI buttons, and instructions.
   const COMMON_CAPITALIZED = new Set([
-    // Prepositions, conjunctions, articles, pronouns
     'the', 'a', 'an', 'and', 'or', 'but', 'if', 'then', 'else', 'when',
     'at', 'by', 'for', 'with', 'about', 'against', 'between', 'through',
     'during', 'before', 'after', 'above', 'below', 'to', 'from', 'up',
     'down', 'in', 'out', 'on', 'off', 'over', 'under', 'again', 'further',
-    'once', 'here', 'there', 'all', 'each', 'every', 'both',
+    'then', 'once', 'here', 'there', 'all', 'each', 'every', 'both',
     'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not',
     'only', 'own', 'same', 'so', 'than', 'too', 'very', 'can', 'will',
     'just', 'should', 'now', 'also', 'into', 'could', 'would', 'may',
     'might', 'shall', 'must', 'need', 'have', 'has', 'had', 'do', 'does',
     'did', 'be', 'is', 'am', 'are', 'was', 'were', 'been', 'being',
-    'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her',
-    'us', 'them', 'my', 'your', 'his', 'its', 'our', 'their',
-    'this', 'that', 'these', 'those', 'what', 'who', 'how', 'why',
-    'which', 'where', 'when', 'while', 'since', 'because', 'although',
-    'however', 'therefore', 'moreover', 'furthermore', 'nevertheless',
-    // Common verbs (appear in titles, headings, buttons, instructions)
     'get', 'got', 'make', 'made', 'go', 'went', 'gone', 'take', 'took',
     'come', 'came', 'see', 'saw', 'know', 'knew', 'think', 'thought',
     'say', 'said', 'tell', 'told', 'give', 'gave', 'find', 'found',
@@ -415,110 +371,25 @@
     'buy', 'wait', 'serve', 'die', 'send', 'expect', 'build', 'stay',
     'fall', 'cut', 'reach', 'kill', 'remain', 'suggest', 'raise', 'pass',
     'sell', 'require', 'report', 'decide', 'pull', 'develop', 'note',
-    'generate', 'design', 'manage', 'process', 'handle', 'check', 'verify',
-    'submit', 'apply', 'accept', 'reject', 'approve', 'deny', 'confirm',
-    'cancel', 'delete', 'remove', 'edit', 'modify', 'view', 'display',
-    'search', 'filter', 'sort', 'select', 'choose', 'pick', 'enter',
-    'input', 'output', 'upload', 'download', 'install', 'uninstall',
-    'enable', 'disable', 'activate', 'deactivate', 'toggle', 'switch',
-    'connect', 'disconnect', 'sync', 'refresh', 'reload', 'reset',
-    'save', 'load', 'store', 'restore', 'backup', 'export', 'import',
-    'copy', 'paste', 'drag', 'drop', 'click', 'press', 'hold', 'release',
-    'scroll', 'zoom', 'resize', 'expand', 'collapse', 'hide', 'reveal',
-    'lock', 'unlock', 'encrypt', 'decrypt', 'sign', 'register', 'login',
-    'logout', 'subscribe', 'unsubscribe', 'share', 'publish', 'deploy',
-    'launch', 'test', 'debug', 'fix', 'patch', 'merge', 'split', 'join',
-    'link', 'attach', 'detach', 'insert', 'append', 'prepend', 'wrap',
-    'format', 'parse', 'convert', 'transform', 'translate', 'compile',
-    'execute', 'render', 'animate', 'validate', 'sanitize', 'escape',
-    // Common nouns (appear in titles, headings, labels)
-    'account', 'action', 'address', 'alert', 'analysis', 'answer',
-    'application', 'area', 'article', 'asset', 'background', 'badge',
-    'banner', 'board', 'body', 'border', 'bottom', 'box', 'brand',
-    'browser', 'buffer', 'button', 'cache', 'calendar', 'card', 'case',
-    'category', 'center', 'channel', 'chart', 'chat', 'child', 'choice',
-    'class', 'client', 'cloud', 'cluster', 'code', 'collection', 'color',
-    'column', 'command', 'comment', 'community', 'company', 'component',
-    'config', 'configuration', 'connection', 'console', 'contact',
-    'container', 'content', 'context', 'control', 'corner', 'count',
-    'country', 'cover', 'custom', 'dashboard', 'data', 'database',
-    'date', 'day', 'default', 'description', 'design', 'desktop',
-    'detail', 'device', 'dialog', 'directory', 'document', 'domain',
-    'draft', 'driver', 'edge', 'editor', 'element', 'email', 'end',
-    'engine', 'entry', 'environment', 'error', 'event', 'example',
-    'exception', 'extension', 'feature', 'feedback', 'field', 'file',
-    'filter', 'folder', 'font', 'footer', 'form', 'format', 'frame',
-    'function', 'gallery', 'general', 'global', 'grid', 'group',
-    'guide', 'handler', 'header', 'health', 'help', 'helper', 'history',
-    'home', 'host', 'icon', 'image', 'index', 'info', 'input', 'instance',
-    'interface', 'issue', 'item', 'job', 'key', 'label', 'language',
-    'layout', 'level', 'library', 'light', 'limit', 'line', 'link',
-    'list', 'local', 'location', 'log', 'logo', 'main', 'manager',
-    'manual', 'map', 'margin', 'master', 'match', 'media', 'member',
-    'memory', 'menu', 'message', 'method', 'middle', 'mobile', 'modal',
-    'mode', 'model', 'module', 'monitor', 'name', 'navigation', 'network',
-    'node', 'note', 'notification', 'number', 'object', 'option',
-    'order', 'origin', 'output', 'overlay', 'overview', 'owner', 'package',
-    'padding', 'page', 'panel', 'parent', 'parser', 'password', 'path',
-    'pattern', 'permission', 'photo', 'pipeline', 'placeholder', 'plan',
-    'platform', 'player', 'plugin', 'point', 'policy', 'pool', 'popup',
-    'port', 'position', 'post', 'power', 'preview', 'primary', 'print',
-    'priority', 'process', 'product', 'profile', 'program', 'progress',
-    'project', 'prompt', 'property', 'protocol', 'provider', 'proxy',
-    'public', 'query', 'queue', 'quick', 'radio', 'range', 'rate',
-    'reader', 'record', 'region', 'release', 'remote', 'render',
-    'report', 'request', 'resource', 'response', 'result', 'review',
-    'role', 'root', 'route', 'row', 'rule', 'runtime', 'sample',
-    'scanner', 'schema', 'scope', 'screen', 'script', 'search',
-    'section', 'security', 'select', 'sender', 'server', 'service',
-    'session', 'setting', 'settings', 'setup', 'share', 'shell',
-    'shortcut', 'sidebar', 'signal', 'simple', 'single', 'site', 'size',
-    'slider', 'slot', 'snapshot', 'socket', 'solution', 'source', 'space',
-    'stage', 'standard', 'start', 'state', 'status', 'step', 'stop',
-    'storage', 'store', 'stream', 'string', 'style', 'subject',
-    'success', 'summary', 'support', 'switch', 'symbol', 'syntax',
-    'system', 'table', 'target', 'task', 'team', 'template', 'terminal',
-    'test', 'text', 'theme', 'thread', 'time', 'timer', 'title', 'token',
-    'tool', 'toolbar', 'tooltip', 'top', 'total', 'track', 'traffic',
-    'tree', 'trigger', 'type', 'unit', 'update', 'upload', 'user',
-    'util', 'utility', 'value', 'variable', 'version', 'video', 'view',
-    'virtual', 'warning', 'watch', 'web', 'widget', 'width', 'window',
-    'wizard', 'word', 'worker', 'workspace', 'wrapper', 'zone',
-    // Common adjectives
-    'active', 'advanced', 'available', 'basic', 'best', 'better', 'blank',
-    'bold', 'clean', 'clear', 'close', 'closed', 'complete', 'complex',
-    'connected', 'correct', 'critical', 'current', 'dark', 'deep',
-    'detailed', 'different', 'direct', 'double', 'dynamic', 'early',
-    'easy', 'empty', 'entire', 'equal', 'essential', 'exact', 'extra',
-    'fast', 'final', 'fine', 'fixed', 'flat', 'free', 'fresh', 'front',
-    'full', 'generic', 'given', 'good', 'great', 'green', 'hard',
-    'hidden', 'high', 'hot', 'huge', 'human', 'initial', 'inner',
-    'internal', 'invalid', 'large', 'late', 'latest', 'left', 'light',
-    'live', 'long', 'low', 'major', 'maximum', 'middle', 'minimum',
-    'minor', 'mixed', 'modern', 'multiple', 'native', 'natural',
-    'nested', 'neutral', 'new', 'normal', 'null', 'old', 'online',
-    'open', 'optional', 'outer', 'overall', 'parallel', 'partial',
-    'pending', 'plain', 'popular', 'possible', 'previous', 'primary',
-    'private', 'proper', 'protected', 'quick', 'random', 'raw', 'ready',
-    'real', 'recent', 'red', 'related', 'relative', 'remote', 'required',
-    'responsive', 'rich', 'right', 'round', 'safe', 'secure', 'selected',
-    'sensitive', 'separate', 'serial', 'shared', 'short', 'silent',
-    'similar', 'simple', 'single', 'small', 'smart', 'smooth', 'soft',
-    'solid', 'special', 'specific', 'stable', 'standard', 'static',
-    'strict', 'strong', 'supported', 'sweet', 'thin', 'tight', 'tiny',
-    'total', 'true', 'unique', 'universal', 'unknown', 'upper', 'valid',
-    'various', 'virtual', 'visible', 'visual', 'warm', 'weak', 'white',
-    'whole', 'wide', 'wild',
-    // Programming/tech terms
+    'however', 'because', 'although', 'since', 'while', 'where', 'which',
+    'what', 'who', 'how', 'why', 'this', 'that', 'these', 'those',
+    'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her',
+    'us', 'them', 'my', 'your', 'his', 'its', 'our', 'their',
+    'new', 'old', 'big', 'small', 'long', 'short', 'good', 'bad',
+    'great', 'little', 'right', 'left', 'first', 'last', 'next',
+    'sure', 'like', 'well', 'back', 'still', 'even', 'much', 'many',
+    // Programming/tech words that appear capitalized
     'string', 'number', 'boolean', 'object', 'array', 'function', 'class',
     'type', 'error', 'null', 'undefined', 'true', 'false', 'return',
     'import', 'export', 'default', 'const', 'let', 'var', 'async', 'await',
     'try', 'catch', 'throw', 'finally', 'switch', 'case', 'break',
-    'example', 'warning', 'important', 'todo', 'fixme', 'hack',
-    // Common sentence starters
+    'note', 'example', 'warning', 'important', 'todo', 'fixme', 'hack',
+    'step', 'option', 'result', 'value', 'key', 'data', 'info',
+    'file', 'code', 'test', 'debug', 'config', 'setup', 'update',
+    // Common sentence starters that aren't names
     'please', 'thanks', 'hello', 'hi', 'hey', 'dear', 'sincerely',
-    'regards', 'best', 'cheers', 'sorry', 'yes', 'ok', 'okay',
-    // Days and months
+    'regards', 'best', 'cheers', 'sorry', 'yes', 'no', 'ok', 'okay',
+    // Days and months (not PPI)
     'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
     'january', 'february', 'march', 'april', 'may', 'june', 'july',
     'august', 'september', 'october', 'november', 'december',
@@ -529,38 +400,46 @@
   /**
    * Detect proper nouns (potential names, company names, project names)
    * that aren't configured in identity. Uses capitalization heuristics:
-   * - ONLY multi-word capitalized sequences (e.g. "Acme Corp", "Project Atlas")
-   * - Single capitalized words are too noisy — every sentence starts with one
+   * - Capitalized words not at the start of a sentence
+   * - Multi-word capitalized sequences (e.g. "Acme Corp", "Project Atlas")
    * - Filters out common English words and programming terms
    */
   function detectProperNouns(text, configured) {
     const findings = [];
-    // Only match TWO OR MORE consecutive capitalized words
-    // Single capitalized words cause too many false positives
-    const re = /\b([A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})+)\b/g;
+    // Match capitalized words that aren't at the very start of the text
+    // and aren't after a period/newline (sentence start)
+    const re = /(?:^|[.!?\n]\s*)?([A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})*)/g;
     let m;
 
     while ((m = re.exec(text)) !== null) {
       const fullMatch = m[1];
       if (!fullMatch) continue;
 
-      // Split into individual words and filter common ones
+      // Check if this is at the start of a sentence
+      const before = text.slice(Math.max(0, m.index - 2), m.index);
+      const isSentenceStart = m.index === 0 || /[.!?\n]\s*$/.test(before);
+
+      // Split into individual words and check each
       const words = fullMatch.split(/\s+/);
       const properWords = words.filter(w =>
         w.length >= 3 &&
         !COMMON_CAPITALIZED.has(w.toLowerCase()) &&
-        !configured.has(w.toLowerCase()) &&
-        !ignoredValues.has(w.toLowerCase())
+        !configured.has(w.toLowerCase())
       );
 
-      if (properWords.length < 2) continue; // need at least 2 proper words
+      if (properWords.length === 0) continue;
 
+      // Single capitalized word at sentence start = likely not a proper noun
+      if (isSentenceStart && properWords.length === 1 && words.length === 1) continue;
+
+      // Multi-word capitalized sequence is likely a proper noun
+      // Single capitalized word mid-sentence is likely a proper noun
       const value = properWords.join(' ');
-      if (value.length >= 5 && !configured.has(value.toLowerCase()) && !ignoredValues.has(value.toLowerCase())) {
+      if (value.length >= 3 && !configured.has(value.toLowerCase())) {
         findings.push({
           name: 'Possible Name/Org',
           value,
-          hint: 'Capitalized phrase — could be a name, company, or project',
+          hint: 'Capitalized word — could be a name, company, or project',
           category: 'name',
         });
       }
@@ -575,11 +454,11 @@
     });
   }
 
-  function autoDetectPII(text, ident) {
+  function autoDetectPPI(text, ident) {
     if (!text || text.length < 5) return [];
     const hasContext = CONTEXT_WORDS_RE.test(text);
 
-    // Build skip set from configured values (identity + explicit mappings)
+    // Build skip set from configured values
     const configured = new Set();
     if (ident) {
       const addAll = (arr, key) => (arr || []).forEach(item => {
@@ -589,32 +468,24 @@
       addAll(ident.names); addAll(ident.emails);
       addAll(ident.usernames); addAll(ident.hostnames); addAll(ident.phones);
     }
-    // Also skip values that are already in explicit mappings
-    for (const m of mappings) {
-      if (m.real) configured.add(m.real.toLowerCase());
-      if (m.substitute) configured.add(m.substitute.toLowerCase());
-    }
 
     const findings = [];
-    for (const pat of PII_PATTERNS) {
+    for (const pat of PPI_PATTERNS) {
       if (pat.contextRequired && !hasContext) continue;
       pat.re.lastIndex = 0;
       let m;
       while ((m = pat.re.exec(text)) !== null) {
         const val = m[0];
         if (configured.has(val.toLowerCase())) continue;
-        if (ignoredValues.has(val.toLowerCase())) continue;
         if (pat.skip && pat.skip.test(val)) continue;
         findings.push({ name: pat.name, value: val, hint: pat.hint, category: pat.cat });
       }
     }
 
     // Proper noun heuristic — catch names, company names, project names
-    // Disabled by default (too many false positives). Enable in Options.
-    if (settings.detectProperNouns) {
-      const properNouns = detectProperNouns(text, configured);
-      findings.push(...properNouns);
-    }
+    // that aren't configured in identity
+    const properNouns = detectProperNouns(text, configured);
+    findings.push(...properNouns);
 
     // Deduplicate by value
     const seen = new Set();
@@ -648,15 +519,15 @@
 
     const more = warnings.length > 5 ? `<div class="ss-ad-more">+${warnings.length - 5} more</div>` : '';
 
-    safeHTML(warningEl, `
+    warningEl.innerHTML = `
       <div class="ss-ad-header">
-        <strong>Silent Send detected potential PII that may not be substituted:</strong>
+        <strong>Silent Send detected potential PPI that may not be substituted:</strong>
         <button class="ss-ad-close">&times;</button>
       </div>
       ${items}
       ${more}
       <div class="ss-ad-footer">${settings.autoRedactDetected !== false ? 'Auto-redacted before sending.' : 'These were sent as-is.'} Consider adding them to your identity or mappings.</div>
-    `);
+    `;
 
     warningEl.classList.add('visible');
 
@@ -676,7 +547,7 @@
   // Secret Scanner (inline for page world)
   // Detects API keys, tokens, passwords, SSNs, credit cards, etc.
   // ============================================================
-  const REDACT_PATTERNS = [
+  const SECRET_PATTERNS = [
     // OpenAI
     { name: 'OpenAI Key', re: /\bsk-[A-Za-z0-9]{20,}\b/g, to: '[REDACTED-OPENAI-KEY]' },
     { name: 'OpenAI Project Key', re: /\bsk-proj-[A-Za-z0-9_-]{20,}\b/g, to: '[REDACTED-OPENAI-KEY]' },
@@ -714,21 +585,11 @@
     { name: 'Credit Card', re: /\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b/g, to: '[REDACTED-CARD]' },
   ];
 
-  function runAutoRedact(text) {
+  function scanAndRedactSecrets(text) {
     const redactions = [];
     let result = text;
 
-    // Combine built-in + custom patterns
-    const allPatterns = [...REDACT_PATTERNS];
-    const custom = settings.customRedactPatterns || [];
-    for (const cp of custom) {
-      if (!cp.enabled || !cp.pattern) continue;
-      try {
-        allPatterns.push({ name: cp.name, re: new RegExp(cp.pattern, 'g'), to: cp.redact });
-      } catch { /* invalid regex — skip */ }
-    }
-
-    for (const pat of allPatterns) {
+    for (const pat of SECRET_PATTERNS) {
       pat.re.lastIndex = 0;
       const matches = [];
       let m;
@@ -746,7 +607,7 @@
         redactions.push({
           original: match.value.slice(0, 8) + '...',  // Don't log the full secret
           replaced: replacement,
-          category: 'redact',
+          category: 'secret',
           pattern: pat.name,
         });
         result =
@@ -769,30 +630,6 @@
   // ============================================================
   const sessionSubstitutions = new Map();
 
-  // Values the user has explicitly ignored via the "Ignore" button.
-  // Persisted to storage so they stay dismissed across page reloads.
-  const ignoredValues = new Set();
-
-  // Load ignored values from storage
-  (async () => {
-    const stored = await getStorageData('ss_ignored_ppi');
-    if (Array.isArray(stored)) {
-      for (const v of stored) ignoredValues.add(v.toLowerCase());
-    }
-  })();
-
-  function addIgnoredValue(value) {
-    ignoredValues.add(value.toLowerCase());
-    // Persist
-    getStorageData('ss_ignored_ppi').then(stored => {
-      const list = Array.isArray(stored) ? stored : [];
-      if (!list.includes(value.toLowerCase())) {
-        list.push(value.toLowerCase());
-        setStorageData('ss_ignored_ppi', list);
-      }
-    });
-  }
-
   // ============================================================
   // Notify content script of substitutions (for badge + logging)
   // ============================================================
@@ -800,25 +637,7 @@
     // Record what was actually substituted so reveal knows
     for (const r of replacements) {
       if (r.replaced && r.original) {
-        // Store full replacement with lowercase key for lookup
-        sessionSubstitutions.set(r.replaced.toLowerCase(), {
-          original: r.original,
-          replaced: r.replaced,
-        });
-        // Also store individual words so reveal pairs match identity entries
-        // e.g. "Ademo Demo" → store "ademo" and "demo" separately
-        const replacedWords = r.replaced.split(/\s+/);
-        const originalWords = r.original.split(/\s+/);
-        if (replacedWords.length > 1) {
-          for (let i = 0; i < replacedWords.length; i++) {
-            if (replacedWords[i] && originalWords[i]) {
-              sessionSubstitutions.set(replacedWords[i].toLowerCase(), {
-                original: originalWords[i],
-                replaced: replacedWords[i],
-              });
-            }
-          }
-        }
+        sessionSubstitutions.set(r.replaced.toLowerCase(), r.original);
       }
     }
 
@@ -938,102 +757,42 @@
     return SKIP_URL_PATTERNS.some(p => p.test(url));
   }
 
-  window.fetch = async function (input, init) {
+  window.fetch = async function (url, options) {
     if (!settings.enabled || !hasSubstitutions()) {
-      return originalFetch.call(this, input, init);
-    }
-
-    // Handle both fetch(url, options) and fetch(Request) signatures
-    let url, options;
-    if (input instanceof Request) {
-      url = input.url;
-      // Clone the Request so we can read/modify the body
-      options = {
-        method: input.method,
-        headers: input.headers,
-        body: null, // will read below
-        mode: input.mode,
-        credentials: input.credentials,
-        cache: input.cache,
-        redirect: input.redirect,
-        referrer: input.referrer,
-        signal: input.signal,
-      };
-      // Read the body from the Request object
-      try {
-        const ct = input.headers.get('content-type') || '';
-        if (ct.includes('json') || ct.includes('text')) {
-          options.body = await input.text();
-        } else {
-          // Non-text body — pass through unmodified
-          return originalFetch.call(this, input, init);
-        }
-      } catch {
-        return originalFetch.call(this, input, init);
-      }
-    } else {
-      url = input;
-      options = init ? { ...init } : {};
+      return originalFetch.call(this, url, options);
     }
 
     const urlStr = typeof url === 'string' ? url : url?.url || '';
     const method = (options?.method || 'GET').toUpperCase();
 
-    // Convert non-string bodies to string where possible
-    if (options.body && typeof options.body !== 'string' && !(options.body instanceof FormData)) {
-      try {
-        if (options.body instanceof Blob) {
-          options.body = await options.body.text();
-        } else if (options.body instanceof ArrayBuffer || ArrayBuffer.isView(options.body)) {
-          options.body = new TextDecoder().decode(options.body);
-        } else if (options.body instanceof URLSearchParams) {
-          options.body = options.body.toString();
-        }
-      } catch { /* leave as-is */ }
-    }
-
-    // Only intercept POST/PUT/PATCH with a body
+    // Only intercept POST/PUT/PATCH with a string body
     if (
       (method === 'POST' || method === 'PUT' || method === 'PATCH') &&
-      options?.body &&
+      options?.body && typeof options.body === 'string' &&
       !shouldSkipUrl(urlStr)
     ) {
-      // Handle FormData with file uploads
-      if (options.body instanceof FormData) {
-        try {
-          const newFormData = await processFormData(options.body);
-          if (newFormData) {
-            options = { ...options, body: newFormData };
-          }
-        } catch (e) {
-          console.warn('[Silent Send] FormData processing failed:', e);
-        }
-      }
-      // Handle string bodies (JSON, raw text)
-      else if (typeof options.body === 'string') {
-        try {
-          // Try JSON
-          const body = JSON.parse(options.body);
-          const { modified, replacements } = processBody(body);
+      try {
+        // Try JSON
+        const body = JSON.parse(options.body);
+        const { modified, replacements } = processBody(body);
 
-          if (modified) {
-            options = { ...options, body: JSON.stringify(body) };
-            notifySubstitutions(replacements);
+        if (modified) {
+          options = { ...options, body: JSON.stringify(body) };
+          notifySubstitutions(replacements);
+          console.log(
+            `[Silent Send] Substituted ${replacements.length} value(s) in ${urlStr}`
+          );
+        }
+      } catch (e) {
+        // Not JSON — try raw string substitution (form data, etc.)
+        if (options.body.length > MIN_STRING_LENGTH) {
+          const result = substituteAll(options.body);
+          if (result.modified) {
+            options = { ...options, body: result.text };
+            notifySubstitutions(result.replacements);
             console.log(
-              `[Silent Send] Substituted ${replacements.length} value(s) in ${urlStr}`
+              `[Silent Send] Substituted ${result.replacements.length} value(s) in form body`
             );
-          }
-        } catch (e) {
-          // Not JSON — try raw string substitution (form data, etc.)
-          if (options.body.length > MIN_STRING_LENGTH) {
-            const result = substituteAll(options.body);
-            if (result.modified) {
-              options = { ...options, body: result.text };
-              notifySubstitutions(result.replacements);
-              console.log(
-                `[Silent Send] Substituted ${result.replacements.length} value(s) in form body`
-              );
-            }
           }
         }
       }
@@ -1041,369 +800,6 @@
 
     return originalFetch.call(this, url, options);
   };
-
-
-
-  // ============================================================
-  // Document Upload Processing
-  //
-  // Scans files in FormData uploads for PII. Supports PDF, DOCX,
-  // XLSX, and text files. Shows preview for binary formats.
-  // ============================================================
-
-  async function processFormData(formData) {
-    let modified = false;
-    const newFormData = new FormData();
-    const allReplacements = [];
-
-    for (const [key, value] of formData.entries()) {
-      if (value instanceof File && value.size > 0) {
-        // Process the file through document scanner
-        const usePreview = settings.docScanPreview !== false &&
-          /\.(pdf|docx|xlsx)$/i.test(value.name);
-
-        const result = await documentScan(value, value.name, {
-          previewMode: usePreview,
-        });
-
-        if (result.preview && usePreview && result.replacements.length > 0) {
-          // Show preview and wait for user confirmation
-          const confirmed = await showDocScanPreview(result.preview, value.name);
-          if (!confirmed) {
-            // User cancelled — use original file
-            newFormData.append(key, value);
-            continue;
-          }
-        }
-
-        if (result.replacements.length > 0 && !result.skipped) {
-          let uploadFile = result.file;
-
-          // If preview was confirmed and we have sanitized text, use it
-          if (result._sanitizedText) {
-            uploadFile = new Blob([result._sanitizedText], { type: 'text/plain' });
-          }
-
-          const newFile = new File([uploadFile], result.filename || value.name, {
-            type: uploadFile.type || value.type,
-          });
-          newFormData.append(key, newFile);
-          allReplacements.push(...result.replacements);
-          modified = true;
-          console.log(
-            `[Silent Send] Substituted ${result.replacements.length} value(s) in file: ${value.name}`
-          );
-        } else {
-          newFormData.append(key, value);
-        }
-      } else if (typeof value === 'string') {
-        // String form field — substitute
-        const result = substituteAll(value);
-        if (result.modified) {
-          newFormData.append(key, result.text);
-          allReplacements.push(...result.replacements);
-          modified = true;
-        } else {
-          newFormData.append(key, value);
-        }
-      } else {
-        newFormData.append(key, value);
-      }
-    }
-
-    if (modified) {
-      notifySubstitutions(allReplacements);
-      return newFormData;
-    }
-    return null;
-  }
-
-  /**
-   * Scan a document file for PII. Strategy: extract text from any
-   * format, substitute PII, upload as plaintext. The AI extracts text
-   * from files anyway — no need to preserve formatting in a file
-   * the user never gets back. Original stays untouched on disk.
-   *
-   * Supported: PDF, DOCX, DOC, XLSX, XLS, ODT, ODS, ODP, PPTX, RTF,
-   * and all text/code formats.
-   */
-  async function documentScan(file, filename, options) {
-    const ext = (filename || '').split('.').pop().toLowerCase();
-
-    // Plain text formats — direct substitution, keep original extension
-    const textExts = new Set(['txt','csv','tsv','json','md','markdown','log',
-      'yaml','yml','toml','ini','cfg','conf','xml','html','htm','css',
-      'js','ts','py','rb','go','rs','java','c','cpp','h','hpp','sh',
-      'bash','zsh','ps1','bat','sql','r','swift','kt','scala','pl','php',
-      'lua','vim','env','gitignore']);
-
-    if (textExts.has(ext)) {
-      const text = await file.text();
-      const result = substituteAll(text);
-      if (result.modified) {
-        return {
-          file: new Blob([result.text], { type: file.type || 'text/plain' }),
-          filename, replacements: result.replacements,
-        };
-      }
-      return { file, filename, replacements: [] };
-    }
-
-    // Binary document formats — extract text, substitute, upload as .txt
-    const docExts = new Set(['pdf','docx','doc','xlsx','xls','odt','ods',
-      'odp','rtf','pptx']);
-
-    if (!docExts.has(ext)) {
-      return { file, filename, replacements: [], skipped: true };
-    }
-
-    try {
-      const text = await extractTextFromDocument(file, ext);
-
-      if (!text || text.trim().length < 5) {
-        return { file, filename, replacements: [], skipped: true,
-          reason: `No extractable text in ${ext.toUpperCase()} (may be scanned/image-only)` };
-      }
-
-      const result = substituteAll(text);
-      const preview = {
-        format: ext,
-        replacementCount: result.replacements.length,
-        replacements: result.replacements.slice(0, 15),
-        note: `${ext.toUpperCase()} text extracted and sanitized for upload`,
-      };
-
-      if (options.previewMode && result.replacements.length > 0) {
-        return { file, filename, replacements: result.replacements, preview,
-          _sanitizedText: result.text };
-      }
-
-      if (result.modified) {
-        return {
-          file: new Blob([result.text], { type: 'text/plain' }),
-          filename: filename.replace(/\.[^.]+$/, '.txt'),
-          replacements: result.replacements, preview,
-        };
-      }
-      return { file, filename, replacements: [] };
-    } catch (e) {
-      console.warn(`[Silent Send] ${ext.toUpperCase()} processing failed:`, e);
-      return { file, filename, replacements: [], skipped: true, reason: e.message };
-    }
-  }
-
-  /**
-   * Extract text from any supported document format.
-   */
-  async function extractTextFromDocument(file, ext) {
-    switch (ext) {
-      case 'pdf': return extractPDFText(file);
-      case 'docx': case 'xlsx': case 'pptx':
-      case 'odt': case 'ods': case 'odp':
-        return extractZipXMLText(file, ext);
-      case 'doc': case 'xls':
-        return extractOldBinaryText(file);
-      case 'rtf':
-        return extractRTFText(file);
-      default: return '';
-    }
-  }
-
-  /** PDF: extract text from content stream operators (Tj, TJ). */
-  async function extractPDFText(file) {
-    const buffer = await file.arrayBuffer();
-    const str = new TextDecoder('latin1').decode(new Uint8Array(buffer));
-    const texts = [];
-    const re = /stream\r?\n([\s\S]*?)endstream/g;
-    let m;
-    while ((m = re.exec(str)) !== null) {
-      const content = m[1];
-      const parts = [];
-      const tj = /\(([^)]*)\)\s*Tj/g;
-      let t;
-      while ((t = tj.exec(content)) !== null) {
-        parts.push(t[1].replace(/\\([nrt\\()])/g, (_, c) =>
-          c === 'n' ? '\n' : c === 'r' ? '\r' : c === 't' ? '\t' : c));
-      }
-      const tjArr = /\[(.*?)\]\s*TJ/g;
-      while ((t = tjArr.exec(content)) !== null) {
-        const inner = /\(([^)]*)\)/g;
-        let s;
-        while ((s = inner.exec(t[1])) !== null) parts.push(s[1]);
-      }
-      if (parts.length) texts.push(parts.join(''));
-    }
-    return texts.join('\n');
-  }
-
-  /**
-   * DOCX/XLSX/PPTX/ODT/ODS/ODP: extract text from ZIP XML entries.
-   */
-  async function extractZipXMLText(file, ext) {
-    const buffer = await file.arrayBuffer();
-    const bytes = new Uint8Array(buffer);
-    const texts = [];
-
-    // Scan for ZIP local file headers
-    let pos = 0;
-    while (pos < bytes.length - 30) {
-      if (bytes[pos] !== 0x50 || bytes[pos+1] !== 0x4b ||
-          bytes[pos+2] !== 0x03 || bytes[pos+3] !== 0x04) {
-        pos++; continue;
-      }
-      const view = new DataView(buffer, pos);
-      const compMethod = view.getUint16(8, true);
-      const compSize = view.getUint32(18, true);
-      const nameLen = view.getUint16(26, true);
-      const extraLen = view.getUint16(28, true);
-      const name = new TextDecoder().decode(bytes.slice(pos + 30, pos + 30 + nameLen));
-      const dataStart = pos + 30 + nameLen + extraLen;
-      const rawData = bytes.slice(dataStart, dataStart + compSize);
-
-      if (isTextXML(name, ext) && compSize > 0) {
-        let xmlStr;
-        try {
-          if (compMethod === 8) {
-            const dec = await inflateData(rawData);
-            xmlStr = dec ? new TextDecoder('utf-8').decode(dec) : null;
-          } else if (compMethod === 0) {
-            xmlStr = new TextDecoder('utf-8').decode(rawData);
-          }
-        } catch { /* skip */ }
-        if (xmlStr) {
-          const re2 = />([^<]+)</g;
-          let m2;
-          while ((m2 = re2.exec(xmlStr)) !== null) {
-            const t = m2[1].trim();
-            if (t.length >= 2 && !/^[\x00-\x1f]+$/.test(t)) texts.push(t);
-          }
-        }
-      }
-      pos = dataStart + compSize;
-    }
-    return texts.join(' ');
-  }
-
-  function isTextXML(name, ext) {
-    switch (ext) {
-      case 'docx': return /^word\/(document|header|footer|comments|endnotes|footnotes)/i.test(name);
-      case 'xlsx': return name === 'xl/sharedStrings.xml' || /^xl\/worksheets\/sheet/i.test(name);
-      case 'pptx': return /^ppt\/slides\/slide/i.test(name);
-      case 'odt': case 'odp': return name === 'content.xml' || name === 'styles.xml';
-      case 'ods': return name === 'content.xml';
-      default: return name.endsWith('.xml');
-    }
-  }
-
-  /** Old binary .doc/.xls: extract readable text runs. */
-  async function extractOldBinaryText(file) {
-    const buffer = await file.arrayBuffer();
-    const bytes = new Uint8Array(buffer);
-    const texts = [];
-    // UTF-16LE extraction (Word stores text as UTF-16)
-    let cur = '';
-    for (let i = 0; i < bytes.length - 1; i += 2) {
-      const code = bytes[i] | (bytes[i + 1] << 8);
-      if (code >= 32 && code < 127) { cur += String.fromCharCode(code); }
-      else { if (cur.length >= 3) texts.push(cur); cur = ''; }
-    }
-    if (cur.length >= 3) texts.push(cur);
-    // ASCII fallback
-    cur = '';
-    for (let i = 0; i < bytes.length; i++) {
-      if (bytes[i] >= 32 && bytes[i] < 127) { cur += String.fromCharCode(bytes[i]); }
-      else { if (cur.length >= 4) texts.push(cur); cur = ''; }
-    }
-    if (cur.length >= 4) texts.push(cur);
-    const seen = new Set();
-    return texts.filter(t => {
-      if (seen.has(t)) return false;
-      seen.add(t);
-      return t.includes(' ') || t.length >= 8;
-    }).join(' ');
-  }
-
-  /** RTF: strip formatting, extract text. */
-  async function extractRTFText(file) {
-    const text = await file.text();
-    return text
-      .replace(/\{\\[^{}]*\}/g, '')
-      .replace(/\\[a-z]+\d*\s?/gi, '')
-      .replace(/[{}]/g, '')
-      .replace(/\\\\/g, '\\')
-      .replace(/\\\'([0-9a-f]{2})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
-      .trim();
-  }
-
-  /** Decompress DEFLATE data using DecompressionStream API. */
-  async function inflateData(data) {
-    if (typeof DecompressionStream === 'undefined') return null;
-    try {
-      const ds = new DecompressionStream('deflate');
-      const writer = ds.writable.getWriter();
-      const reader = ds.readable.getReader();
-      writer.write(data); writer.close();
-      const chunks = [];
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-      }
-      const total = chunks.reduce((s, c) => s + c.length, 0);
-      const result = new Uint8Array(total);
-      let p = 0;
-      for (const c of chunks) { result.set(c, p); p += c.length; }
-      return result;
-    } catch { return null; }
-  }
-
-  // Document Scan Preview UI
-  let docPreviewEl = null;
-
-  function showDocScanPreview(preview, filename) {
-    return new Promise((resolve) => {
-      if (!docPreviewEl) {
-        docPreviewEl = document.createElement('div');
-        docPreviewEl.className = 'ss-doc-preview';
-        document.body.appendChild(docPreviewEl);
-      }
-      const items = (preview.replacements || []).map(r =>
-        `<div class="ss-dp-item">
-          <code class="ss-dp-orig">${(r.original || '').length > 25 ? r.original.slice(0, 22) + '...' : r.original}</code>
-          <span>&rarr;</span>
-          <code class="ss-dp-repl">${r.replaced}</code>
-        </div>`
-      ).join('');
-
-      safeHTML(docPreviewEl, `
-        <div class="ss-dp-header">
-          <strong>PII found in ${esc(filename)}</strong>
-          <span class="ss-dp-count">${preview.replacementCount} item(s)</span>
-        </div>
-        <div class="ss-dp-note">${preview.note || ''}</div>
-        <div class="ss-dp-items">${items}</div>
-        <div class="ss-dp-actions">
-          <button class="ss-dp-btn ss-dp-confirm">Substitute & Upload</button>
-          <button class="ss-dp-btn ss-dp-cancel">Upload Original</button>
-        </div>
-      `);
-      docPreviewEl.classList.add('visible');
-      const confirm = docPreviewEl.querySelector('.ss-dp-confirm');
-      const cancel = docPreviewEl.querySelector('.ss-dp-cancel');
-      const cleanup = () => {
-        docPreviewEl.classList.remove('visible');
-        confirm.removeEventListener('click', onConfirm);
-        cancel.removeEventListener('click', onCancel);
-      };
-      const onConfirm = () => { cleanup(); resolve(true); };
-      const onCancel = () => { cleanup(); resolve(false); };
-      confirm.addEventListener('click', onConfirm);
-      cancel.addEventListener('click', onCancel);
-      setTimeout(() => {
-        if (docPreviewEl.classList.contains('visible')) { cleanup(); resolve(false); }
-      }, 30000);
-    });
-  }
 
   // ============================================================
   // XMLHttpRequest Interception — same aggressive approach
@@ -1477,8 +873,7 @@
     // Helper: only add if this substitute was actually sent
     function addIfUsed(from, to, caseSensitive) {
       if (!from || !to) return;
-      const entry = sessionSubstitutions.get(from.toLowerCase());
-      if (entry) {
+      if (sessionSubstitutions.has(from.toLowerCase())) {
         pairs.push({ from, to, caseSensitive });
       }
     }
@@ -1507,9 +902,9 @@
     }
 
     // Also add auto-detect and secret scanner substitutions from this session
-    for (const [key, entry] of sessionSubstitutions) {
-      if (!pairs.some(p => p.from.toLowerCase() === key)) {
-        pairs.push({ from: entry.replaced, to: entry.original });
+    for (const [replaced, original] of sessionSubstitutions) {
+      if (!pairs.some(p => p.from.toLowerCase() === replaced)) {
+        pairs.push({ from: replaced, to: original });
       }
     }
 
@@ -1543,37 +938,17 @@
     return result;
   }
 
-  /**
-   * Reverse of revealText: replace real values back to substitutes.
-   * Used when reveal mode is turned OFF to restore the AI's actual text.
-   */
-  function unrevealText(text) {
-    const pairs = getRevealPairs();
-    let result = text;
-    // Reverse direction: real (p.to) → substitute (p.from)
-    // Sort by length descending to avoid partial matches
-    const reversed = [...pairs].sort((a, b) => b.to.length - a.to.length);
-    for (const p of reversed) {
-      const escaped = esc(p.to);
-      const regex = new RegExp(escaped, p.caseSensitive ? 'g' : 'gi');
-      result = result.replace(regex, p.from);
-    }
-    return result;
-  }
+  const originalTexts = new WeakMap();
 
   function revealInElement(el) {
     if (SKIP_REVEAL_TAGS.has(el.tagName)) return;
     if (el.classList?.contains('ss-reveal-badge')) return;
-    if (el.isContentEditable) return;
-    if (isInNonChatArea(el)) return;
 
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
         const parent = node.parentElement;
         if (parent && SKIP_REVEAL_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
         if (parent?.closest?.('.ss-autodetect-warning, .ss-presend-warning, .ss-reveal-badge')) return NodeFilter.FILTER_REJECT;
-        if (parent?.closest?.('[contenteditable="true"]')) return NodeFilter.FILTER_REJECT;
-        if (isInNonChatArea(parent)) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }
     });
@@ -1582,6 +957,10 @@
     while ((textNode = walker.nextNode())) {
       const text = textNode.textContent;
       if (!text || text.length < MIN_STRING_LENGTH) continue;
+
+      if (!originalTexts.has(textNode)) {
+        originalTexts.set(textNode, text);
+      }
 
       const revealed = revealText(text);
       if (revealed !== text) {
@@ -1592,26 +971,13 @@
 
   function unrevealInElement(el) {
     if (SKIP_REVEAL_TAGS.has(el.tagName)) return;
-    if (el.isContentEditable) return;
-    if (isInNonChatArea(el)) return;
 
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
-      acceptNode(node) {
-        const parent = node.parentElement;
-        if (parent?.closest?.('[contenteditable="true"]')) return NodeFilter.FILTER_REJECT;
-        if (isInNonChatArea(parent)) return NodeFilter.FILTER_REJECT;
-        return NodeFilter.FILTER_ACCEPT;
-      }
-    });
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     let textNode;
     while ((textNode = walker.nextNode())) {
-      const text = textNode.textContent;
-      if (!text || text.length < MIN_STRING_LENGTH) continue;
-
-      // Actively replace real→substitute (reverse of reveal)
-      const unrevealed = unrevealText(text);
-      if (unrevealed !== text) {
-        textNode.textContent = unrevealed;
+      const original = originalTexts.get(textNode);
+      if (original && textNode.textContent !== original) {
+        textNode.textContent = original;
       }
     }
   }
@@ -1633,8 +999,6 @@
         const parent = node.parentElement;
         if (parent && SKIP_REVEAL_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
         if (parent?.closest?.('.ss-autodetect-warning, .ss-presend-warning, .ss-reveal-badge')) return NodeFilter.FILTER_REJECT;
-        if (parent?.closest?.('[contenteditable="true"]')) return NodeFilter.FILTER_REJECT;
-        if (isInNonChatArea(parent)) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }
     });
@@ -1673,17 +1037,10 @@
     }
   }
 
-  // Elements to skip when revealing (inputs, scripts, styles, extension UI, navigation)
+  // Elements to skip when revealing (inputs, scripts, styles, extension UI)
   const SKIP_REVEAL_TAGS = new Set([
     'SCRIPT', 'STYLE', 'NOSCRIPT', 'IFRAME', 'INPUT', 'TEXTAREA', 'SELECT',
-    'NAV', 'ASIDE', 'HEADER', 'FOOTER',
   ]);
-
-  // Skip reveal in navigation, sidebars, headers, and other non-chat UI
-  function isInNonChatArea(el) {
-    if (!el) return false;
-    return !!el.closest('nav, aside, header, footer, [role="navigation"], [role="banner"], [role="complementary"], [data-sidebar], [class*="sidebar"], [class*="Sidebar"], [class*="nav-"], [class*="Nav"], [class*="menu"], [class*="Menu"], [class*="header"], [class*="Header"]');
-  }
 
   // Reveal ALL text on the page + apply highlights
   function revealAllResponses() {
@@ -1722,19 +1079,15 @@
           // Only do text replacement in reveal mode
           if (settings.revealMode) {
             if (node.nodeType === Node.ELEMENT_NODE) {
-              // Skip non-chat areas, contenteditable, and skipped tags
-              if (!SKIP_REVEAL_TAGS.has(node.tagName) &&
-                  !node.isContentEditable &&
-                  !node.closest?.('[contenteditable="true"]') &&
-                  !isInNonChatArea(node)) {
+              if (!SKIP_REVEAL_TAGS.has(node.tagName)) {
                 revealInElement(node);
               }
             } else if (node.nodeType === Node.TEXT_NODE) {
-              // Skip text nodes inside contenteditable
-              const parent = node.parentElement;
-              if (parent?.closest?.('[contenteditable="true"]')) continue;
               const text = node.textContent;
               if (text && text.length >= MIN_STRING_LENGTH) {
+                if (!originalTexts.has(node)) {
+                  originalTexts.set(node, text);
+                }
                 const revealed = revealText(text);
                 if (revealed !== text) {
                   node.textContent = revealed;
@@ -1751,9 +1104,10 @@
             const text = mutation.target.textContent;
             if (text && text.length >= MIN_STRING_LENGTH) {
               const parent = mutation.target.parentElement;
-              // Skip contenteditable (chat input)
-              if (parent?.closest?.('[contenteditable="true"]')) continue;
               if (parent && !SKIP_REVEAL_TAGS.has(parent.tagName)) {
+                if (!originalTexts.has(mutation.target)) {
+                  originalTexts.set(mutation.target, text);
+                }
                 const revealed = revealText(text);
                 if (revealed !== text) {
                   mutation.target.textContent = revealed;
@@ -1826,7 +1180,7 @@
   }
 
   // ============================================================
-  // Pre-Send PII Detection — scans as you type/paste (spellcheck style)
+  // Pre-Send PPI Detection — scans as you type/paste (spellcheck style)
   // ============================================================
 
   // Generate obviously-fake values using reserved/standard ranges
@@ -1876,21 +1230,21 @@
     const items = warnings.slice(0, 8).map((w, i) => {
       const fake = generateFake(w.name, w.value);
       const displayVal = w.value.length > 25 ? w.value.slice(0, 22) + '...' : w.value;
-      const displayFake = fake.length > 20 ? fake.slice(0, 17) + '...' : fake;
       return `<div class="ss-ps-item">
         <span class="ss-ps-type">${w.name}</span>
         <code class="ss-ps-value">${displayVal}</code>
         <span class="ss-ps-hint">${w.hint}</span>
-        <button class="ss-ps-add" data-real="${encodeURIComponent(w.value)}" data-fake="${encodeURIComponent(fake)}" data-cat="${w.category}" title="Add mapping: ${displayVal} → ${displayFake}">+</button>
-        <button class="ss-ps-ignore" data-value="${encodeURIComponent(w.value)}" title="Never flag this value again">ignore</button>
+        ${settings.autoAddDetected !== false
+          ? `<button class="ss-ps-add" data-real="${encodeURIComponent(w.value)}" data-fake="${encodeURIComponent(fake)}" data-cat="${w.category}" title="Add mapping: ${displayVal} → ${fake}">+</button>`
+          : ''}
       </div>`;
     }).join('');
 
     const more = warnings.length > 8 ? `<div class="ss-ad-more">+${warnings.length - 8} more</div>` : '';
 
-    safeHTML(preSendWarningEl, `
+    preSendWarningEl.innerHTML = `
       <div class="ss-ad-header">
-        <strong>Potential PII detected — not yet configured:</strong>
+        <strong>Potential PPI detected — not yet configured:</strong>
         <button class="ss-ad-close">&times;</button>
       </div>
       ${items}
@@ -1899,7 +1253,7 @@
         ${settings.autoRedactDetected !== false ? 'Auto-redacted with standard placeholders.' : 'These were sent as-is.'}
         ${settings.autoAddDetected !== false ? ' Click + to add a permanent mapping.' : ''}
       </div>
-    `);
+    `;
 
     preSendWarningEl.classList.add('visible');
 
@@ -1908,57 +1262,41 @@
       preSendWarningEl.classList.remove('visible');
     });
 
-    // Auto-add buttons (+)
+    // Auto-add buttons
     preSendWarningEl.querySelectorAll('.ss-ps-add').forEach(btn => {
       btn.addEventListener('click', async () => {
         const real = decodeURIComponent(btn.dataset.real);
         const fake = decodeURIComponent(btn.dataset.fake);
         const cat = btn.dataset.cat || 'general';
 
-        // Add to local mappings array (used by the fetch interceptor)
-        const newMapping = {
+        // Add to mappings via storage
+        const result = await getStorageData('ss_mappings');
+        const currentMappings = result || [];
+        currentMappings.push({
           id: crypto.randomUUID(),
           real, substitute: fake,
           category: cat,
           caseSensitive: false,
           enabled: true,
           createdAt: Date.now(),
-        };
-        mappings.push(newMapping);
+        });
+        await setStorageData('ss_mappings', currentMappings);
 
-        // Persist via storage bridge (handles encryption transparently)
-        setStorageData('ss_mappings', mappings);
+        // Update local mappings so the fetch interceptor uses them immediately
+        mappings = currentMappings;
 
-        // Replace the PII value in the current input right now
+        // Replace the PPI value in the current input right now
         if (inputEl) {
           replaceInInput(inputEl, real, fake);
-          // Re-scan — will dismiss warning if no more PII remains
+          // Re-scan — will dismiss warning if no more PPI remains
           if (inputScanTimer) clearTimeout(inputScanTimer);
-          inputScanTimer = setTimeout(() => scanInputForPII(inputEl), 150);
+          inputScanTimer = setTimeout(() => scanInputForPPI(inputEl), 150);
         }
 
         // Visual feedback
         btn.textContent = '\u2714';
         btn.style.color = '#4ade80';
         btn.disabled = true;
-      });
-    });
-
-    // Ignore buttons
-    preSendWarningEl.querySelectorAll('.ss-ps-ignore').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const value = decodeURIComponent(btn.dataset.value);
-        addIgnoredValue(value);
-
-        // Remove this item's row
-        const row = btn.closest('.ss-ps-item');
-        if (row) row.remove();
-
-        // Re-scan to update warning
-        if (inputEl) {
-          if (inputScanTimer) clearTimeout(inputScanTimer);
-          inputScanTimer = setTimeout(() => scanInputForPII(inputEl), 150);
-        }
       });
     });
   }
@@ -2008,14 +1346,14 @@
   // Scan input on type and paste
   let inputScanTimer = null;
 
-  function scanInputForPII(target) {
+  function scanInputForPPI(target) {
     const text = target.textContent || target.value || '';
     if (!text || text.length < 5) {
       if (preSendWarningEl) preSendWarningEl.classList.remove('visible');
       return;
     }
 
-    const warnings = autoDetectPII(text, identity);
+    const warnings = autoDetectPPI(text, identity);
     if (warnings.length > 0) {
       showPreSendWarning(warnings, target);
     } else if (preSendWarningEl) {
@@ -2029,7 +1367,7 @@
     if (target.matches?.('[contenteditable], textarea, input[type="text"]')) {
       // Debounce — don't scan on every keystroke
       if (inputScanTimer) clearTimeout(inputScanTimer);
-      inputScanTimer = setTimeout(() => scanInputForPII(target), 800);
+      inputScanTimer = setTimeout(() => scanInputForPPI(target), 800);
     }
   }, true);
 
@@ -2039,7 +1377,7 @@
     if (target.matches?.('[contenteditable], textarea, input[type="text"]') ||
         target.closest?.('[contenteditable]')) {
       // Scan shortly after paste completes
-      setTimeout(() => scanInputForPII(target.closest?.('[contenteditable]') || target), 200);
+      setTimeout(() => scanInputForPPI(target.closest?.('[contenteditable]') || target), 200);
     }
   }, true);
 

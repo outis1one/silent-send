@@ -1,6 +1,6 @@
 import SubstitutionEngine from '../lib/substitution-engine.js';
 import SmartPatterns from '../lib/smart-patterns.js';
-import AutoRedact from '../lib/auto-redact.js';
+import SecretScanner from '../lib/secret-scanner.js';
 import AutoDetect from '../lib/auto-detect.js';
 import Storage from '../lib/storage.js';
 import SilentSendSync from '../lib/sync.js';
@@ -17,12 +17,6 @@ let settings = {};
 // --- DOM refs ---
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
-
-// --- Safe innerHTML replacement (AMO-compliant) ---
-function safeHTML(el, html) {
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  el.replaceChildren(...Array.from(doc.body.childNodes));
-}
 
 // --- Init ---
 document.addEventListener('DOMContentLoaded', async () => {
@@ -208,43 +202,10 @@ async function initUnlockedUI() {
     });
   });
 
-  // Open full options page button (Options tab)
-  $('#btnOpenFullOptions').addEventListener('click', () => {
+  // Options link
+  $('#btnOptions').addEventListener('click', (e) => {
+    e.preventDefault();
     api.runtime.openOptionsPage();
-  });
-
-  // Load options tab settings
-  $('#optAutoRedact').checked = settings.autoRedact !== false;
-  $('#optAutoDetect').checked = settings.autoDetect !== false;
-  $('#optAutoRedactDetected').checked = settings.autoRedactDetected !== false;
-  $('#optHighlights').checked = settings.showHighlights || false;
-  $('#optDocPreview').checked = settings.docScanPreview !== false;
-  $('#optProperNouns').checked = settings.detectProperNouns || false;
-
-  // Options tab change handlers
-  const optHandlers = [
-    ['optAutoRedact', 'autoRedact'],
-    ['optAutoDetect', 'autoDetect'],
-    ['optAutoRedactDetected', 'autoRedactDetected'],
-    ['optHighlights', 'showHighlights'],
-    ['optDocPreview', 'docScanPreview'],
-    ['optProperNouns', 'detectProperNouns'],
-  ];
-  for (const [id, key] of optHandlers) {
-    $(`#${id}`).addEventListener('change', async (e) => {
-      settings[key] = e.target.checked;
-      await Storage.saveSettings({ [key]: e.target.checked });
-      api.runtime.sendMessage({ type: 'update:settings', settings });
-    });
-  }
-
-  // --- Popup domain management ---
-  renderPopupDomains();
-  renderPopupDomainSuggestions();
-
-  $('#btnPopupAddDomain').addEventListener('click', popupAddDomain);
-  $('#popupNewDomain').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') popupAddDomain();
   });
 
   // Update privacy note based on encryption state
@@ -341,17 +302,11 @@ async function showLockedUI() {
 // --- Profiles ---
 function renderProfileSelector() {
   const select = $('#profileSelect');
-  // Build options via DOM API — safeHTML + DOMParser mangles <option> elements
-  select.replaceChildren();
-  for (const p of profiles) {
-    const opt = new Option(
-      `${p.name}${p.active ? '' : ' (off)'}`,
-      p.id,
-      false,
-      p.id === currentProfileId
-    );
-    select.appendChild(opt);
-  }
+  select.innerHTML = profiles.map(p =>
+    `<option value="${p.id}" ${p.id === currentProfileId ? 'selected' : ''}>` +
+    `${escapeHtml(p.name)}${p.active ? '' : ' (off)'}` +
+    `</option>`
+  ).join('');
 
   const profile = profiles.find(p => p.id === currentProfileId);
   $('#profileActive').checked = profile?.active ?? true;
@@ -400,7 +355,7 @@ function renderFieldList(fieldName, items) {
     items = [{ real: '', substitute: '', type: config.defaultType || '' }];
   }
 
-  safeHTML(container, items.map((item, i) => {
+  container.innerHTML = items.map((item, i) => {
     let typeHtml = '';
     if (config.typeOptions) {
       typeHtml = `<select class="id-type-select" data-index="${i}" style="padding:3px 2px;font-size:10px;border:1px solid #e5e7eb;border-radius:3px;width:42px">` +
@@ -416,7 +371,7 @@ function renderFieldList(fieldName, items) {
       <input type="text" class="input input-sm id-sub" value="${escapeAttr(item.substitute || '')}" placeholder="${config.placeholderSub}">
       <button class="btn-remove" title="Remove">&times;</button>
     </div>`;
-  }).join(''));
+  }).join('');
 
   // Bind remove buttons
   container.querySelectorAll('.btn-remove').forEach(btn => {
@@ -465,13 +420,13 @@ function loadIdentityForm() {
           ).join('') +
           `</select>`;
       }
-      safeHTML(tempDiv, `<div class="id-entry-row" data-index="${count}">
+      tempDiv.innerHTML = `<div class="id-entry-row" data-index="${count}">
         ${typeHtml}
         <input type="text" class="input input-sm id-real" placeholder="${config.placeholderReal}">
         <span class="arrow" style="font-size:12px">&rarr;</span>
         <input type="text" class="input input-sm id-sub" placeholder="${config.placeholderSub}">
         <button class="btn-remove" title="Remove">&times;</button>
-      </div>`);
+      </div>`;
       const row = tempDiv.firstElementChild;
       container.appendChild(row);
       row.querySelector('.btn-remove').addEventListener('click', () => {
@@ -621,11 +576,11 @@ function renderMappings() {
   const list = $('#mappingList');
 
   if (mappings.length === 0) {
-    safeHTML(list, '<div class="empty-state">No mappings yet. Add your first one above.</div>');
+    list.innerHTML = '<div class="empty-state">No mappings yet. Add your first one above.</div>';
     return;
   }
 
-  safeHTML(list, mappings
+  list.innerHTML = mappings
     .map(
       (m) => `
     <div class="mapping-item" data-id="${m.id}">
@@ -642,7 +597,7 @@ function renderMappings() {
     </div>
   `
     )
-    .join(''));
+    .join('');
 
   // Bind actions
   list.querySelectorAll('.btn-delete').forEach((btn) => {
@@ -676,11 +631,11 @@ async function renderActivity() {
   countEl.textContent = `${log.length} substitution${log.length !== 1 ? 's' : ''} logged`;
 
   if (log.length === 0) {
-    safeHTML(list, '<div class="empty-state">No activity yet.</div>');
+    list.innerHTML = '<div class="empty-state">No activity yet.</div>';
     return;
   }
 
-  safeHTML(list, log
+  list.innerHTML = log
     .slice(0, 50)
     .map((entry) => {
       const time = new Date(entry.timestamp).toLocaleTimeString([], {
@@ -698,7 +653,7 @@ async function renderActivity() {
       </div>
     `;
     })
-    .join(''));
+    .join('');
 }
 
 // --- Test Diff (Strip: real → fake) ---
@@ -708,23 +663,23 @@ function renderTestDiff() {
   const stats = $('#diffStats');
 
   if (!input) {
-    output.replaceChildren();
+    output.innerHTML = '';
     stats.textContent = '';
     return;
   }
 
   const smartResult = SmartPatterns.substitute(input, identity);
   const explicitResult = SubstitutionEngine.substitute(smartResult.text, mappings);
-  const redactResult = AutoRedact.redact(explicitResult.text, settings.customRedactPatterns);
+  const secretResult = SecretScanner.redact(explicitResult.text);
 
   const allReplacements = [
     ...smartResult.replacements,
     ...explicitResult.replacements,
-    ...redactResult.redactions,
+    ...secretResult.redactions,
   ];
-  const finalText = redactResult.text;
+  const finalText = secretResult.text;
 
-  if (finalText === input && redactResult.warnings.length === 0) {
+  if (finalText === input && secretResult.warnings.length === 0) {
     output.textContent = input;
     stats.textContent = 'No substitutions detected';
     return;
@@ -740,40 +695,38 @@ function renderTestDiff() {
       `<span class="sub-highlight" title="Was: ${escapeHtml(r.original)} [${r.pattern || r.category}]">${escapedReplaced}</span>`
     );
   }
-  // Highlight auto-redactions in red
-  for (const r of redactResult.redactions) {
+  // Highlight secret redactions in red
+  for (const r of secretResult.redactions) {
     const escapedReplaced = escapeHtml(r.replaced);
     html = html.replace(
       escapedReplaced,
       `<span class="sub-highlight" style="background:#fee2e2;color:#dc2626" title="${escapeHtml(r.pattern)}">${escapedReplaced}</span>`
     );
   }
-  safeHTML(output, html);
+  output.innerHTML = html;
 
   const smartCount = smartResult.replacements.length;
   const explicitCount = explicitResult.replacements.length;
-  const redactCount = redactResult.redactions.length;
-  const warnCount = redactResult.warnings.length;
+  const secretCount = secretResult.redactions.length;
+  const warnCount = secretResult.warnings.length;
   const parts = [];
   if (smartCount > 0) parts.push(`${smartCount} smart`);
   if (explicitCount > 0) parts.push(`${explicitCount} explicit`);
-  if (redactCount > 0) parts.push(`${redactCount} auto-redacted`);
+  if (secretCount > 0) parts.push(`${secretCount} secrets redacted`);
   if (warnCount > 0) parts.push(`${warnCount} warnings`);
 
-  // Auto-detect unconfigured PII in the final text
-  const piiWarnings = AutoDetect.scan(finalText, identity);
-  if (piiWarnings.length > 0) parts.push(`${piiWarnings.length} PII detected`);
+  // Auto-detect unconfigured PPI in the final text
+  const ppiWarnings = AutoDetect.scan(finalText, identity);
+  if (ppiWarnings.length > 0) parts.push(`${ppiWarnings.length} PPI detected`);
 
   stats.textContent = `${allReplacements.length} substitution${allReplacements.length !== 1 ? 's' : ''} (${parts.join(', ')})`;
 
-  // Show PII warnings below stats
-  if (piiWarnings.length > 0) {
-    const piiDiv = document.createElement('div');
-    safeHTML(piiDiv, `<div style="margin-top:6px;padding:6px 8px;background:#fef3c7;border-radius:4px;color:#92400e;font-size:11px">
-      <strong>Unconfigured PII detected:</strong>
-      ${piiWarnings.map(w => `<div style="margin-top:3px"><code style="background:#fff;padding:1px 4px;border-radius:2px;color:#b45309">${escapeHtml(w.value)}</code> — ${w.hint}</div>`).join('')}
-    </div>`);
-    stats.appendChild(piiDiv);
+  // Show PPI warnings below stats
+  if (ppiWarnings.length > 0) {
+    stats.innerHTML += `<div style="margin-top:6px;padding:6px 8px;background:#fef3c7;border-radius:4px;color:#92400e;font-size:11px">
+      <strong>Unconfigured PPI detected:</strong>
+      ${ppiWarnings.map(w => `<div style="margin-top:3px"><code style="background:#fff;padding:1px 4px;border-radius:2px;color:#b45309">${escapeHtml(w.value)}</code> — ${w.hint}</div>`).join('')}
+    </div>`;
   }
 }
 
@@ -784,7 +737,7 @@ function renderRevealDiff() {
   const stats = $('#revealStats');
 
   if (!input) {
-    output.replaceChildren();
+    output.innerHTML = '';
     stats.textContent = '';
     return;
   }
@@ -830,7 +783,7 @@ function renderRevealDiff() {
       `<span class="sub-highlight" title="Was: ${escapeHtml(pair.substitute)}" style="background:#dbeafe;color:#1d4ed8">${escapedReal}</span>`
     );
   }
-  safeHTML(output, html);
+  output.innerHTML = html;
   stats.textContent = `${totalCount} value${totalCount !== 1 ? 's' : ''} revealed`;
 }
 
@@ -909,114 +862,6 @@ function escapeRegex(str) {
 function updateStatusDot() {
   const dot = $('#statusDot');
   dot.classList.toggle('disabled', !settings.enabled);
-}
-
-// --- Popup Domain Management ---
-
-const POPUP_SUGGESTED_DOMAINS = [
-  { label: 'Mistral', url: 'https://chat.mistral.ai' },
-  { label: 'Cohere', url: 'https://coral.cohere.com' },
-  { label: 'Phind', url: 'https://www.phind.com' },
-  { label: 'You.com', url: 'https://you.com' },
-  { label: 'Pi AI', url: 'https://pi.ai' },
-  { label: 'Discord', url: 'https://discord.com' },
-  { label: 'Slack', url: 'https://app.slack.com' },
-  { label: 'Notion', url: 'https://www.notion.so' },
-  { label: 'Linear', url: 'https://linear.app' },
-  { label: 'Bitbucket', url: 'https://bitbucket.org' },
-];
-
-function normalizeDomain(raw) {
-  let d = raw.trim();
-  if (!d) return null;
-  if (!d.startsWith('http://') && !d.startsWith('https://')) d = 'https://' + d;
-  return d.replace(/\/+$/, '');
-}
-
-async function popupAddDomain() {
-  const domain = normalizeDomain($('#popupNewDomain').value);
-  if (!domain) return;
-
-  const domains = settings.customDomains || [];
-  if (domains.includes(domain)) return;
-
-  try {
-    const granted = await api.permissions.request({ origins: [domain + '/*'] });
-    if (!granted) return;
-  } catch (e) { /* non-fatal */ }
-
-  domains.push(domain);
-  settings.customDomains = domains;
-  await Storage.saveSettings({ customDomains: domains });
-  $('#popupNewDomain').value = '';
-  renderPopupDomains();
-  renderPopupDomainSuggestions();
-}
-
-function renderPopupDomains() {
-  const list = $('#popupDomainList');
-  if (!list) return;
-  const domains = settings.customDomains || [];
-
-  if (domains.length === 0) {
-    safeHTML(list, '<div style="font-size:11px;color:#9ca3af;padding:4px 0">No custom domains added</div>');
-    return;
-  }
-
-  safeHTML(list, domains.map((d, i) => `
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:3px 6px;background:#f9fafb;border-radius:4px;margin-bottom:2px">
-      <span style="font-size:11px;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${escapeHtml(d)}</span>
-      <button class="btn-popup-remove-domain" data-index="${i}" style="border:none;background:none;color:#9ca3af;cursor:pointer;font-size:14px;padding:0 2px;line-height:1" title="Remove">&times;</button>
-    </div>
-  `).join(''));
-
-  list.querySelectorAll('.btn-popup-remove-domain').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const idx = parseInt(btn.dataset.index, 10);
-      const domains = settings.customDomains || [];
-      const removed = domains.splice(idx, 1)[0];
-      settings.customDomains = domains;
-      await Storage.saveSettings({ customDomains: domains });
-      if (removed) {
-        try { await api.permissions.remove({ origins: [removed + '/*'] }); } catch (e) { /* non-fatal */ }
-      }
-      renderPopupDomains();
-      renderPopupDomainSuggestions();
-    });
-  });
-}
-
-function renderPopupDomainSuggestions() {
-  const container = $('#popupDomainSuggestions');
-  if (!container) return;
-  const domains = settings.customDomains || [];
-
-  const available = POPUP_SUGGESTED_DOMAINS.filter(s => !domains.includes(s.url));
-  if (available.length === 0) {
-    container.replaceChildren();
-    return;
-  }
-
-  safeHTML(container, available.slice(0, 6).map(s =>
-    `<button class="btn-popup-suggest" data-url="${escapeHtml(s.url)}" title="${escapeHtml(s.url)}" style="font-size:10px;padding:2px 6px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;cursor:pointer;color:#6b7280;white-space:nowrap">+ ${escapeHtml(s.label)}</button>`
-  ).join(''));
-
-  container.querySelectorAll('.btn-popup-suggest').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const domain = btn.dataset.url;
-      const domains = settings.customDomains || [];
-      if (domains.includes(domain)) return;
-      try {
-        const granted = await api.permissions.request({ origins: [domain + '/*'] });
-        if (!granted) return;
-      } catch (e) { /* non-fatal */ }
-      domains.push(domain);
-      settings.customDomains = domains;
-      await Storage.saveSettings({ customDomains: domains });
-      renderPopupDomains();
-      renderPopupDomainSuggestions();
-    });
-  });
 }
 
 // --- Util ---

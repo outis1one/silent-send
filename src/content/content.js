@@ -1513,11 +1513,18 @@
     // Catch-all: add any session substitution not already covered above.
     // This picks up combined names ("Ademo Demo" → "John Smith"),
     // auto-detected PII, and auto-redacted secrets.
+    // Skip entries that are substrings of a longer entry (e.g. "Ademo"
+    // is part of "Ademo Demo") to prevent partial replacements.
+    const allKeys = [...sessionSubstitutions.keys()];
     for (const [key, entry] of sessionSubstitutions) {
-      if (!added.has(key)) {
-        pairs.push({ from: entry.replaced, to: entry.original });
-        added.add(key);
-      }
+      if (added.has(key)) continue;
+      // Skip if this entry's replaced value is a substring of a longer one
+      const isPartOfLonger = allKeys.some(k =>
+        k !== key && k.includes(key) && sessionSubstitutions.has(k)
+      );
+      if (isPartOfLonger) continue;
+      pairs.push({ from: entry.replaced, to: entry.original });
+      added.add(key);
     }
 
     pairs.sort((a, b) => b.from.length - a.from.length);
@@ -1527,6 +1534,7 @@
   // Cache — invalidate when identity/mappings change or new substitutions happen
   // Settings-only updates (e.g. reveal toggle) do NOT invalidate
   let _revealPairsCache = null;
+  let _lastSessionSubsSize = 0;
   window.addEventListener('message', (event) => {
     if (event.data?.type === 'ss:config-updated') {
       if (event.data.mappings || event.data.identity) _revealPairsCache = null;
@@ -1535,7 +1543,12 @@
   });
 
   function getRevealPairs() {
-    if (!_revealPairsCache) _revealPairsCache = buildRevealPairs();
+    // Rebuild if cache cleared OR if new substitutions were added
+    const currentSize = sessionSubstitutions.size;
+    if (!_revealPairsCache || currentSize !== _lastSessionSubsSize) {
+      _revealPairsCache = buildRevealPairs();
+      _lastSessionSubsSize = currentSize;
+    }
     return _revealPairsCache;
   }
 
@@ -1696,8 +1709,6 @@
 
   // Reveal ALL text on the page + apply highlights
   function revealAllResponses() {
-    const pairs = getRevealPairs();
-    console.log('[Silent Send] revealAllResponses — pairs:', pairs.length, pairs.map(p => `"${p.from}" → "${p.to}"`));
     revealInElement(document.body);
     highlightMatches(document.body);
   }

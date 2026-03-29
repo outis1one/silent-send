@@ -1629,13 +1629,13 @@
   // Elements to skip when revealing (inputs, scripts, styles, extension UI)
   const SKIP_REVEAL_TAGS = new Set([
     'SCRIPT', 'STYLE', 'NOSCRIPT', 'IFRAME', 'INPUT', 'TEXTAREA', 'SELECT',
-    'NAV', 'ASIDE', 'HEADER', 'FOOTER',
   ]);
 
-  // Skip reveal in navigation, sidebars, headers, and other non-chat UI
+  // Skip reveal in navigation and sidebars — but NOT broadly by class name,
+  // as sites like Claude.ai use "header" in class names for chat content areas
   function isInNonChatArea(el) {
     if (!el) return false;
-    return !!el.closest('nav, aside, header, footer, [role="navigation"], [role="banner"], [role="complementary"], [data-sidebar], [class*="sidebar"], [class*="Sidebar"], [class*="nav-"], [class*="Nav"], [class*="menu"], [class*="Menu"], [class*="header"], [class*="Header"]');
+    return !!el.closest('nav, aside, [role="navigation"], [role="complementary"], [data-sidebar]');
   }
 
   // Reveal ALL text on the page + apply highlights

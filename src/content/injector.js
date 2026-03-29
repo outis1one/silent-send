@@ -97,9 +97,17 @@
       identity = mergeProfiles(identity);
     }
 
+    // Inject config as a global variable before loading content.js
+    // Using a separate inline-data element ensures content.js can read it
+    // even if there's a race condition with script.onload removal
+    const configEl = document.createElement('script');
+    configEl.type = 'application/json';
+    configEl.id = 'ss-config-data';
+    configEl.textContent = JSON.stringify({ mappings, identity, settings });
+    (document.head || document.documentElement).appendChild(configEl);
+
     // Inject the main interception script into the page's world
     const script = document.createElement('script');
-    script.setAttribute('data-ss-config', JSON.stringify({ mappings, identity, settings }));
     script.src = api.runtime.getURL('src/content/content.js');
     (document.head || document.documentElement).appendChild(script);
     script.onload = () => script.remove();

@@ -287,7 +287,7 @@
   }
 
   // ============================================================
-  // Combined substitution: smart patterns + explicit + auto-redact
+  // Combined substitution: smart patterns + explicit + secret scan
   // + auto-detect warning for unconfigured PII
   // ============================================================
   function substituteAll(text) {
@@ -301,12 +301,12 @@
     const explicit = substitute(smart.text, mappings);
     allReplacements.push(...explicit.replacements);
 
-    // 3. Auto Redact (API keys, tokens, SSNs, credit cards, custom patterns, etc.)
+    // 3. Secret scanner (API keys, tokens, SSNs, credit cards, etc.)
     let finalText = explicit.text;
     if (settings.autoRedact !== false) {
-      const redacted = runAutoRedact(finalText);
-      allReplacements.push(...redacted.redactions);
-      finalText = redacted.text;
+      const secrets = runAutoRedact(finalText);
+      allReplacements.push(...secrets.redactions);
+      finalText = secrets.text;
     }
 
     // 4. Auto-detect: scan the FINAL text for unconfigured PII
@@ -578,7 +578,7 @@
     if (!text || text.length < 5) return [];
     const hasContext = CONTEXT_WORDS_RE.test(text);
 
-    // Build skip set from configured values
+    // Build skip set from configured values (identity + explicit mappings)
     const configured = new Set();
     if (ident) {
       const addAll = (arr, key) => (arr || []).forEach(item => {
@@ -587,6 +587,11 @@
       });
       addAll(ident.names); addAll(ident.emails);
       addAll(ident.usernames); addAll(ident.hostnames); addAll(ident.phones);
+    }
+    // Also skip values that are already in explicit mappings
+    for (const m of mappings) {
+      if (m.real) configured.add(m.real.toLowerCase());
+      if (m.substitute) configured.add(m.substitute.toLowerCase());
     }
 
     const findings = [];
@@ -604,9 +609,11 @@
     }
 
     // Proper noun heuristic — catch names, company names, project names
-    // that aren't configured in identity
-    const properNouns = detectProperNouns(text, configured);
-    findings.push(...properNouns);
+    // Disabled by default (too many false positives). Enable in Options.
+    if (settings.detectProperNouns) {
+      const properNouns = detectProperNouns(text, configured);
+      findings.push(...properNouns);
+    }
 
     // Deduplicate by value
     const seen = new Set();
@@ -665,9 +672,8 @@
   }
 
   // ============================================================
-  // Auto Redact (inline for page world)
-  // Detects API keys, tokens, passwords, SSNs, credit cards,
-  // plus user-defined custom patterns from settings.
+  // Secret Scanner (inline for page world)
+  // Detects API keys, tokens, passwords, SSNs, credit cards, etc.
   // ============================================================
   const REDACT_PATTERNS = [
     // OpenAI
@@ -793,11 +799,25 @@
     // Record what was actually substituted so reveal knows
     for (const r of replacements) {
       if (r.replaced && r.original) {
-        // Store with lowercase key for lookup, but preserve original case
+        // Store full replacement with lowercase key for lookup
         sessionSubstitutions.set(r.replaced.toLowerCase(), {
           original: r.original,
-          replaced: r.replaced,  // preserve original case
+          replaced: r.replaced,
         });
+        // Also store individual words so reveal pairs match identity entries
+        // e.g. "Ademo Demo" → store "ademo" and "demo" separately
+        const replacedWords = r.replaced.split(/\s+/);
+        const originalWords = r.original.split(/\s+/);
+        if (replacedWords.length > 1) {
+          for (let i = 0; i < replacedWords.length; i++) {
+            if (replacedWords[i] && originalWords[i]) {
+              sessionSubstitutions.set(replacedWords[i].toLowerCase(), {
+                original: originalWords[i],
+                replaced: replacedWords[i],
+              });
+            }
+          }
+        }
       }
     }
 
@@ -917,13 +937,59 @@
     return SKIP_URL_PATTERNS.some(p => p.test(url));
   }
 
-  window.fetch = async function (url, options) {
+  window.fetch = async function (input, init) {
     if (!settings.enabled || !hasSubstitutions()) {
-      return originalFetch.call(this, url, options);
+      return originalFetch.call(this, input, init);
+    }
+
+    // Handle both fetch(url, options) and fetch(Request) signatures
+    let url, options;
+    if (input instanceof Request) {
+      url = input.url;
+      // Clone the Request so we can read/modify the body
+      options = {
+        method: input.method,
+        headers: input.headers,
+        body: null, // will read below
+        mode: input.mode,
+        credentials: input.credentials,
+        cache: input.cache,
+        redirect: input.redirect,
+        referrer: input.referrer,
+        signal: input.signal,
+      };
+      // Read the body from the Request object
+      try {
+        const ct = input.headers.get('content-type') || '';
+        if (ct.includes('json') || ct.includes('text')) {
+          options.body = await input.text();
+        } else {
+          // Non-text body — pass through unmodified
+          return originalFetch.call(this, input, init);
+        }
+      } catch {
+        return originalFetch.call(this, input, init);
+      }
+    } else {
+      url = input;
+      options = init ? { ...init } : {};
     }
 
     const urlStr = typeof url === 'string' ? url : url?.url || '';
     const method = (options?.method || 'GET').toUpperCase();
+
+    // Convert non-string bodies to string where possible
+    if (options.body && typeof options.body !== 'string' && !(options.body instanceof FormData)) {
+      try {
+        if (options.body instanceof Blob) {
+          options.body = await options.body.text();
+        } else if (options.body instanceof ArrayBuffer || ArrayBuffer.isView(options.body)) {
+          options.body = new TextDecoder().decode(options.body);
+        } else if (options.body instanceof URLSearchParams) {
+          options.body = options.body.toString();
+        }
+      } catch { /* leave as-is */ }
+    }
 
     // Only intercept POST/PUT/PATCH with a body
     if (
@@ -974,6 +1040,8 @@
 
     return originalFetch.call(this, url, options);
   };
+
+
 
   // ============================================================
   // Document Upload Processing
@@ -1404,17 +1472,13 @@
   // session, preventing false positives (e.g. "user" in AI prose).
   function buildRevealPairs() {
     const pairs = [];
-    const added = new Set();
 
     // Helper: only add if this substitute was actually sent
     function addIfUsed(from, to, caseSensitive) {
       if (!from || !to) return;
-      const key = from.toLowerCase();
-      if (added.has(key)) return;
-      const entry = sessionSubstitutions.get(key);
+      const entry = sessionSubstitutions.get(from.toLowerCase());
       if (entry) {
         pairs.push({ from, to, caseSensitive });
-        added.add(key);
       }
     }
 
@@ -1427,9 +1491,9 @@
       for (const e of (identity.emails || [])) {
         addIfUsed(e.substitute, e.real);
       }
-      // For names: DON'T add individual first/last — the smart pattern engine
-      // combines them (e.g. "Ademo Demo" for "John Smith"). The catch-all
-      // below picks up the combined form from sessionSubstitutions.
+      for (const n of (identity.names || [])) {
+        addIfUsed(n.substitute, n.real);
+      }
       for (const u of (identity.usernames || [])) {
         addIfUsed(u.substitute, u.real);
       }
@@ -1441,45 +1505,27 @@
       }
     }
 
-    // Catch-all: add any session substitution not already covered above.
-    // This picks up combined names ("Ademo Demo" → "John Smith"),
-    // auto-detected PII, and auto-redacted secrets.
-    // Skip entries that are substrings of a longer entry (e.g. "Ademo"
-    // is part of "Ademo Demo") to prevent partial replacements.
-    const allKeys = [...sessionSubstitutions.keys()];
+    // Also add auto-detect and secret scanner substitutions from this session
     for (const [key, entry] of sessionSubstitutions) {
-      if (added.has(key)) continue;
-      // Skip if this entry's replaced value is a substring of a longer one
-      const isPartOfLonger = allKeys.some(k =>
-        k !== key && k.includes(key) && sessionSubstitutions.has(k)
-      );
-      if (isPartOfLonger) continue;
-      pairs.push({ from: entry.replaced, to: entry.original });
-      added.add(key);
+      if (!pairs.some(p => p.from.toLowerCase() === key)) {
+        pairs.push({ from: entry.replaced, to: entry.original });
+      }
     }
 
     pairs.sort((a, b) => b.from.length - a.from.length);
     return pairs;
   }
 
-  // Cache — invalidate when identity/mappings change or new substitutions happen
-  // Settings-only updates (e.g. reveal toggle) do NOT invalidate
+  // Cache — invalidate when config changes or new substitutions happen
   let _revealPairsCache = null;
-  let _lastSessionSubsSize = 0;
+  let _revealPairsCacheSize = 0;
   window.addEventListener('message', (event) => {
-    if (event.data?.type === 'ss:config-updated') {
-      if (event.data.mappings || event.data.identity) _revealPairsCache = null;
-    }
+    if (event.data?.type === 'ss:config-updated') _revealPairsCache = null;
     if (event.data?.type === 'ss:substitution-performed') _revealPairsCache = null;
   });
 
   function getRevealPairs() {
-    // Rebuild if cache cleared OR if new substitutions were added
-    const currentSize = sessionSubstitutions.size;
-    if (!_revealPairsCache || currentSize !== _lastSessionSubsSize) {
-      _revealPairsCache = buildRevealPairs();
-      _lastSessionSubsSize = currentSize;
-    }
+    if (!_revealPairsCache) _revealPairsCache = buildRevealPairs();
     return _revealPairsCache;
   }
 
@@ -1626,16 +1672,16 @@
     }
   }
 
-  // Elements to skip when revealing (inputs, scripts, styles, extension UI)
+  // Elements to skip when revealing (inputs, scripts, styles, extension UI, navigation)
   const SKIP_REVEAL_TAGS = new Set([
     'SCRIPT', 'STYLE', 'NOSCRIPT', 'IFRAME', 'INPUT', 'TEXTAREA', 'SELECT',
+    'NAV', 'ASIDE', 'HEADER', 'FOOTER',
   ]);
 
-  // Skip reveal in navigation and sidebars — but NOT broadly by class name,
-  // as sites like Claude.ai use "header" in class names for chat content areas
+  // Skip reveal in navigation, sidebars, headers, and other non-chat UI
   function isInNonChatArea(el) {
     if (!el) return false;
-    return !!el.closest('nav, aside, [role="navigation"], [role="complementary"], [data-sidebar]');
+    return !!el.closest('nav, aside, header, footer, [role="navigation"], [role="banner"], [role="complementary"], [data-sidebar], [class*="sidebar"], [class*="Sidebar"], [class*="nav-"], [class*="Nav"], [class*="menu"], [class*="Menu"], [class*="header"], [class*="Header"]');
   }
 
   // Reveal ALL text on the page + apply highlights
@@ -1675,10 +1721,11 @@
           // Only do text replacement in reveal mode
           if (settings.revealMode) {
             if (node.nodeType === Node.ELEMENT_NODE) {
-              // Skip contenteditable (chat input) and skipped tags
+              // Skip non-chat areas, contenteditable, and skipped tags
               if (!SKIP_REVEAL_TAGS.has(node.tagName) &&
                   !node.isContentEditable &&
-                  !node.closest?.('[contenteditable="true"]')) {
+                  !node.closest?.('[contenteditable="true"]') &&
+                  !isInNonChatArea(node)) {
                 revealInElement(node);
               }
             } else if (node.nodeType === Node.TEXT_NODE) {
@@ -1746,14 +1793,6 @@
       unrevealAllResponses();
     }
     prevRevealMode = settings.revealMode;
-  }
-
-  // If reveal mode was already ON at page load, start the interval immediately
-  if (settings.revealMode) {
-    console.log('[Silent Send] Reveal mode ON (from saved settings)');
-    revealInterval = setInterval(() => {
-      if (settings.revealMode) revealAllResponses();
-    }, 2000);
   }
 
   // Hook into config updates to detect reveal toggle
@@ -1836,13 +1875,12 @@
     const items = warnings.slice(0, 8).map((w, i) => {
       const fake = generateFake(w.name, w.value);
       const displayVal = w.value.length > 25 ? w.value.slice(0, 22) + '...' : w.value;
+      const displayFake = fake.length > 20 ? fake.slice(0, 17) + '...' : fake;
       return `<div class="ss-ps-item">
         <span class="ss-ps-type">${w.name}</span>
         <code class="ss-ps-value">${displayVal}</code>
         <span class="ss-ps-hint">${w.hint}</span>
-        ${settings.autoAddDetected !== false
-          ? `<button class="ss-ps-add" data-real="${encodeURIComponent(w.value)}" data-fake="${encodeURIComponent(fake)}" data-cat="${w.category}" title="Add mapping: ${displayVal} → ${fake}">+</button>`
-          : ''}
+        <button class="ss-ps-add" data-real="${encodeURIComponent(w.value)}" data-fake="${encodeURIComponent(fake)}" data-cat="${w.category}" title="Add mapping: ${displayVal} → ${displayFake}">+</button>
         <button class="ss-ps-ignore" data-value="${encodeURIComponent(w.value)}" title="Never flag this value again">ignore</button>
       </div>`;
     }).join('');
@@ -1869,28 +1907,26 @@
       preSendWarningEl.classList.remove('visible');
     });
 
-    // Auto-add buttons
+    // Auto-add buttons (+)
     preSendWarningEl.querySelectorAll('.ss-ps-add').forEach(btn => {
       btn.addEventListener('click', async () => {
         const real = decodeURIComponent(btn.dataset.real);
         const fake = decodeURIComponent(btn.dataset.fake);
         const cat = btn.dataset.cat || 'general';
 
-        // Add to mappings via storage
-        const result = await getStorageData('ss_mappings');
-        const currentMappings = result || [];
-        currentMappings.push({
+        // Add to local mappings array (used by the fetch interceptor)
+        const newMapping = {
           id: crypto.randomUUID(),
           real, substitute: fake,
           category: cat,
           caseSensitive: false,
           enabled: true,
           createdAt: Date.now(),
-        });
-        await setStorageData('ss_mappings', currentMappings);
+        };
+        mappings.push(newMapping);
 
-        // Update local mappings so the fetch interceptor uses them immediately
-        mappings = currentMappings;
+        // Persist via storage bridge (handles encryption transparently)
+        setStorageData('ss_mappings', mappings);
 
         // Replace the PII value in the current input right now
         if (inputEl) {

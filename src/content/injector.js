@@ -70,6 +70,14 @@
     // Merge active profiles into a flat identity object for the content script
     const identity = mergeProfiles(identityData);
 
+    // Inject the document scanner into the page's world first (sets globalThis.DocumentScanner)
+    const docScannerScript = document.createElement('script');
+    docScannerScript.type = 'module';
+    docScannerScript.src = api.runtime.getURL('src/lib/document-scanner.js');
+    (document.head || document.documentElement).appendChild(docScannerScript);
+    await new Promise(resolve => { docScannerScript.onload = resolve; docScannerScript.onerror = resolve; });
+    docScannerScript.remove();
+
     // Inject the main interception script into the page's world
     const script = document.createElement('script');
     script.setAttribute('data-ss-config', JSON.stringify({ mappings, identity, settings }));

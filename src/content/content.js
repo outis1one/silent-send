@@ -26,12 +26,13 @@
   let settings = { enabled: true, revealMode: false, showHighlights: false };
 
   try {
-    const configEl = document.querySelector('script[data-ss-config]');
+    const configEl = document.getElementById('ss-config-data');
     if (configEl) {
-      const config = JSON.parse(configEl.getAttribute('data-ss-config'));
+      const config = JSON.parse(configEl.textContent);
       mappings = config.mappings || [];
       identity = config.identity || {};
       settings = { ...settings, ...(config.settings || {}) };
+      configEl.remove(); // clean up
     }
   } catch (e) {
     console.warn('[Silent Send] Failed to parse initial config:', e);

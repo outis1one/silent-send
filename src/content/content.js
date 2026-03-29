@@ -738,6 +738,52 @@
   }
 
   // ============================================================
+  // Document Scanner — process file uploads in FormData
+  // ============================================================
+  async function scanFormData(formData) {
+    const newForm = new FormData();
+    const allReplacements = [];
+    let anyModified = false;
+
+    for (const [key, value] of formData.entries()) {
+      if (value instanceof File || value instanceof Blob) {
+        const filename = value instanceof File ? value.name : (key || 'file');
+        try {
+          const result = await globalThis.DocumentScanner.processUpload(
+            value, filename, substituteAll
+          );
+          if (result.replacements.length > 0) {
+            anyModified = true;
+            allReplacements.push(...result.replacements);
+            const newFile = new File([result.file], result.filename, { type: result.file.type });
+            newForm.append(key, newFile, result.filename);
+          } else {
+            newForm.append(key, value, filename);
+          }
+        } catch (e) {
+          console.warn('[Silent Send] Document scan failed for', filename, e);
+          newForm.append(key, value, filename);
+        }
+      } else if (typeof value === 'string' && value.length >= MIN_STRING_LENGTH) {
+        // Also substitute string fields in the FormData
+        const result = substituteAll(value);
+        if (result.modified) {
+          anyModified = true;
+          allReplacements.push(...result.replacements);
+          newForm.append(key, result.text);
+        } else {
+          newForm.append(key, value);
+        }
+      } else {
+        newForm.append(key, value);
+      }
+    }
+
+    if (!anyModified) return null;
+    return { formData: newForm, replacements: allReplacements };
+  }
+
+  // ============================================================
   // Fetch Interception — scans ALL POST requests with a body.
   // Service-agnostic: doesn't depend on URL patterns.
   // ============================================================
@@ -765,34 +811,54 @@
     const urlStr = typeof url === 'string' ? url : url?.url || '';
     const method = (options?.method || 'GET').toUpperCase();
 
-    // Only intercept POST/PUT/PATCH with a string body
+    // Only intercept POST/PUT/PATCH
     if (
       (method === 'POST' || method === 'PUT' || method === 'PATCH') &&
-      options?.body && typeof options.body === 'string' &&
-      !shouldSkipUrl(urlStr)
+      options?.body && !shouldSkipUrl(urlStr)
     ) {
-      try {
-        // Try JSON
-        const body = JSON.parse(options.body);
-        const { modified, replacements } = processBody(body);
-
-        if (modified) {
-          options = { ...options, body: JSON.stringify(body) };
-          notifySubstitutions(replacements);
-          console.log(
-            `[Silent Send] Substituted ${replacements.length} value(s) in ${urlStr}`
-          );
+      // FormData body — scan file uploads via DocumentScanner
+      if (options.body instanceof FormData && typeof globalThis.DocumentScanner !== 'undefined') {
+        try {
+          const scannedForm = await scanFormData(options.body);
+          if (scannedForm) {
+            options = { ...options, body: scannedForm.formData };
+            if (scannedForm.replacements.length > 0) {
+              notifySubstitutions(scannedForm.replacements);
+              console.log(
+                `[Silent Send] Substituted ${scannedForm.replacements.length} value(s) in file upload to ${urlStr}`
+              );
+            }
+          }
+        } catch (e) {
+          console.warn('[Silent Send] FormData scan failed:', e);
         }
-      } catch (e) {
-        // Not JSON — try raw string substitution (form data, etc.)
-        if (options.body.length > MIN_STRING_LENGTH) {
-          const result = substituteAll(options.body);
-          if (result.modified) {
-            options = { ...options, body: result.text };
-            notifySubstitutions(result.replacements);
+      }
+
+      // String body — JSON or raw text
+      if (typeof options.body === 'string') {
+        try {
+          // Try JSON
+          const body = JSON.parse(options.body);
+          const { modified, replacements } = processBody(body);
+
+          if (modified) {
+            options = { ...options, body: JSON.stringify(body) };
+            notifySubstitutions(replacements);
             console.log(
-              `[Silent Send] Substituted ${result.replacements.length} value(s) in form body`
+              `[Silent Send] Substituted ${replacements.length} value(s) in ${urlStr}`
             );
+          }
+        } catch (e) {
+          // Not JSON — try raw string substitution (form data, etc.)
+          if (options.body.length > MIN_STRING_LENGTH) {
+            const result = substituteAll(options.body);
+            if (result.modified) {
+              options = { ...options, body: result.text };
+              notifySubstitutions(result.replacements);
+              console.log(
+                `[Silent Send] Substituted ${result.replacements.length} value(s) in form body`
+              );
+            }
           }
         }
       }
@@ -969,15 +1035,37 @@
     }
   }
 
+  function unrevealText(text) {
+    const pairs = getRevealPairs();
+    let result = text;
+    for (const p of pairs) {
+      const escaped = esc(p.to);   // p.to is the real value
+      const regex = new RegExp(escaped, p.caseSensitive ? 'g' : 'gi');
+      result = result.replace(regex, p.from);  // p.from is the substitute
+    }
+    return result;
+  }
+
   function unrevealInElement(el) {
     if (SKIP_REVEAL_TAGS.has(el.tagName)) return;
 
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const parent = node.parentElement;
+        if (parent && SKIP_REVEAL_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
+        if (parent?.closest?.('.ss-autodetect-warning, .ss-presend-warning, .ss-reveal-badge')) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
     let textNode;
     while ((textNode = walker.nextNode())) {
-      const original = originalTexts.get(textNode);
-      if (original && textNode.textContent !== original) {
-        textNode.textContent = original;
+      const text = textNode.textContent;
+      if (!text || text.length < MIN_STRING_LENGTH) continue;
+      const unrevealed = unrevealText(text);
+      if (unrevealed !== text) {
+        textNode.textContent = unrevealed;
+        // Update saved original so future reveals start from the right state
+        originalTexts.set(textNode, unrevealed);
       }
     }
   }

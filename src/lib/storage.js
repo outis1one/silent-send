@@ -36,6 +36,7 @@ const DEFAULT_SETTINGS = {
   revealMode: false,
   secretScanning: true,
   autoDetect: true,
+  detectProperNouns: false,
   autoRedactDetected: true,
   autoAddDetected: true,
   maxLogEntries: 200,

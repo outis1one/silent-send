@@ -1076,6 +1076,7 @@
 
   function highlightMatches(root) {
     if (!hasHighlightAPI) return;
+    if (!settings.enabled) { hlSubstituted.clear(); hlRevealed.clear(); return; }
 
     // Clear previous ranges
     hlSubstituted.clear();
@@ -1158,7 +1159,7 @@
   // Watch for ANY new content on the page
   function observeResponses() {
     const observer = new MutationObserver((mutations) => {
-      if (!hasSubstitutions()) return;
+      if (!settings.enabled || !hasSubstitutions()) return;
 
       // Always schedule highlight refresh for new content (yellow markers)
       let hasNewContent = false;
@@ -1223,21 +1224,22 @@
   let revealInterval = null;
 
   function checkRevealToggle() {
-    if (settings.revealMode && !prevRevealMode) {
+    const effectiveReveal = settings.revealMode && settings.enabled;
+    if (effectiveReveal && !prevRevealMode) {
       // Just turned ON — reveal everything existing
       console.log('[Silent Send] Reveal mode ON');
       revealAllResponses();
       // Keep re-revealing periodically to catch new/streamed content
       revealInterval = setInterval(() => {
-        if (settings.revealMode) revealAllResponses();
+        if (settings.revealMode && settings.enabled) revealAllResponses();
       }, 2000);
-    } else if (!settings.revealMode && prevRevealMode) {
-      // Just turned OFF — restore originals
+    } else if (!effectiveReveal && prevRevealMode) {
+      // Just turned OFF (or extension disabled) — restore originals
       console.log('[Silent Send] Reveal mode OFF');
       if (revealInterval) { clearInterval(revealInterval); revealInterval = null; }
       unrevealAllResponses();
     }
-    prevRevealMode = settings.revealMode;
+    prevRevealMode = effectiveReveal;
   }
 
   // Hook into config updates to detect reveal toggle
@@ -1246,6 +1248,13 @@
     if (event.data?.type === 'ss:config-updated') {
       // Settings were updated — check if reveal mode changed
       setTimeout(checkRevealToggle, 100);
+
+      // If extension was just disabled, clean up all visual artifacts
+      if (settings.enabled === false) {
+        if (hasHighlightAPI && hlSubstituted) { hlSubstituted.clear(); hlRevealed.clear(); }
+        if (preSendWarningEl) preSendWarningEl.classList.remove('visible');
+        if (warningEl) warningEl.classList.remove('visible');
+      }
     }
   });
 
@@ -1452,7 +1461,7 @@
   }
 
   document.addEventListener('input', (e) => {
-    if (settings.autoDetect === false) return;
+    if (!settings.enabled || settings.autoDetect === false) return;
     const target = e.target;
     if (target.matches?.('[contenteditable], textarea, input[type="text"]')) {
       // Debounce — don't scan on every keystroke
@@ -1462,7 +1471,7 @@
   }, true);
 
   document.addEventListener('paste', (e) => {
-    if (settings.autoDetect === false) return;
+    if (!settings.enabled || settings.autoDetect === false) return;
     const target = e.target;
     if (target.matches?.('[contenteditable], textarea, input[type="text"]') ||
         target.closest?.('[contenteditable]')) {
@@ -1499,7 +1508,7 @@
     updateRevealBadge();
 
     // If reveal mode was already on at page load, reveal everything
-    if (settings.revealMode && hasSubstitutions()) {
+    if (settings.enabled && settings.revealMode && hasSubstitutions()) {
       // Wait for page content to render
       setTimeout(revealAllResponses, 1000);
       setTimeout(revealAllResponses, 3000);

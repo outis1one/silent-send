@@ -752,12 +752,42 @@ const SilentSendSync = {
     }
   },
 
+  /**
+   * Search the authenticated user's Gists for one containing silent-send-sync.json.
+   * Returns the Gist ID string, or null if not found.
+   */
+  async _findSyncGistId(token) {
+    try {
+      let page = 1;
+      while (page <= 5) {
+        const resp = await fetch(`https://api.github.com/gists?per_page=100&page=${page}`, {
+          headers: { Authorization: `token ${token}` },
+        });
+        if (!resp.ok) return null;
+        const gists = await resp.json();
+        if (!gists.length) break;
+        for (const gist of gists) {
+          if (gist.files?.['silent-send-sync.json']) return gist.id;
+        }
+        if (gists.length < 100) break;
+        page++;
+      }
+      return null;
+    } catch { return null; }
+  },
+
   async pullFromGist(token) {
     if (!token) return { success: false, reason: 'No GitHub token provided.' };
     try {
       const stored = await api.storage.local.get('ss_gist_id');
-      const gistId = stored.ss_gist_id;
-      if (!gistId) return { success: false, reason: 'No Gist ID stored. Push first.' };
+      let gistId = stored.ss_gist_id;
+
+      if (!gistId) {
+        // No locally-stored Gist ID — search the account for one
+        gistId = await this._findSyncGistId(token);
+        if (!gistId) return { success: false, reason: 'No sync Gist found. Push from the source browser first.' };
+        await api.storage.local.set({ ss_gist_id: gistId });
+      }
 
       const resp = await fetch(`https://api.github.com/gists/${gistId}`, {
         headers: { Authorization: `token ${token}` },

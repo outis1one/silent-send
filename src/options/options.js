@@ -189,7 +189,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     const r = await SilentSendSync.pullFromGist(token);
     if (r.needsAuth) {
       setGistSyncStatus('Authentication required to decrypt.', 'warn');
-      showSyncAuthPrompt();
+      window.__ssPendingSyncImport = async () => {
+        const r2 = await SilentSendSync.pullFromGist(token);
+        if (r2.needsAuth) {
+          setGistSyncStatus('Authentication failed — wrong password?', 'error');
+        } else if (!r2.success) {
+          setGistSyncStatus('Pull failed: ' + r2.reason, 'error');
+        } else if (r2.imported) {
+          setGistSyncStatus(`Pulled (${r2.time}). Refreshing…`, 'ok');
+          mappings = await Storage.getMappings();
+          settings = await Storage.getSettings();
+          renderMappings();
+          renderDomains();
+          renderLog();
+        } else {
+          setGistSyncStatus('Already up to date.', 'ok');
+        }
+      };
+      showSyncAuthPrompt('decrypt');
     } else if (!r.success) {
       setGistSyncStatus('Pull failed: ' + r.reason, 'error');
     } else if (r.imported) {
@@ -229,7 +246,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     const r = await SilentSendSync.pullFromUrl({ url, headers });
     if (r.needsAuth) {
       setUrlSyncStatus('Authentication required to decrypt.', 'warn');
-      showSyncAuthPrompt();
+      window.__ssPendingSyncImport = async () => {
+        const r2 = await SilentSendSync.pullFromUrl({ url, headers });
+        if (r2.needsAuth) {
+          setUrlSyncStatus('Authentication failed — wrong password?', 'error');
+        } else if (!r2.success) {
+          setUrlSyncStatus('Pull failed: ' + r2.reason, 'error');
+        } else if (r2.imported) {
+          setUrlSyncStatus(`Pulled (${r2.time}). Refreshing…`, 'ok');
+          mappings = await Storage.getMappings();
+          settings = await Storage.getSettings();
+          renderMappings();
+          renderDomains();
+          renderLog();
+        } else {
+          setUrlSyncStatus('Already up to date.', 'ok');
+        }
+      };
+      showSyncAuthPrompt('decrypt');
     } else if (!r.success) {
       setUrlSyncStatus('Pull failed: ' + r.reason, 'error');
     } else if (r.imported) {

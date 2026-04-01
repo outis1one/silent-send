@@ -751,7 +751,8 @@ const SilentSendSync = {
       }
 
       const json = await resp.json();
-      await api.storage.local.set({ ss_gist_id: json.id });
+      const now = Date.now();
+      await api.storage.local.set({ ss_gist_id: json.id, ss_last_push_time: now, ss_last_push_source: 'gist' });
       return { success: true, gistId: json.id };
     } catch (e) {
       return { success: false, reason: e.message };

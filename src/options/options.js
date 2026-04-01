@@ -161,11 +161,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   // --- GitHub Gist sync ---
   // Restore saved token (session only — never persisted to storage)
   {
-    const stored = await api.storage.local.get(['ss_gist_id', 'ss_last_pull_time', 'ss_last_pull_source']);
+    const stored = await api.storage.local.get([
+      'ss_gist_id', 'ss_last_pull_time', 'ss_last_pull_source',
+      'ss_last_push_time', 'ss_last_push_source',
+    ]);
     if (stored.ss_gist_id) {
       let status = `Gist ID: ${stored.ss_gist_id.slice(0, 12)}…`;
+      if (stored.ss_last_push_time && stored.ss_last_push_source === 'gist') {
+        status += ` · Pushed: ${new Date(stored.ss_last_push_time).toLocaleString()}`;
+      }
       if (stored.ss_last_pull_time && stored.ss_last_pull_source === 'gist') {
-        status += ` · Last pulled: ${new Date(stored.ss_last_pull_time).toLocaleString()}`;
+        status += ` · Pulled: ${new Date(stored.ss_last_pull_time).toLocaleString()}`;
       }
       setGistSyncStatus(status, 'ok');
     }

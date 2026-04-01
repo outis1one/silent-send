@@ -16,6 +16,8 @@
   let mappings = [];
   let identity = {};
   let settings = { enabled: true, revealMode: false, showHighlights: false };
+  // Values the user has permanently dismissed from auto-detect warnings
+  let ignoredDetections = new Set();
 
   try {
     const configEl = document.querySelector('script[data-ss-config]');
@@ -278,7 +280,8 @@
     // 4. Auto-detect: scan the FINAL text for unconfigured PII
     //    Auto-redact if enabled, otherwise just warn
     if (settings.autoDetect !== false) {
-      const warnings = autoDetectPII(finalText, identity, { detectProperNouns: settings.detectProperNouns === true });
+      const warnings = autoDetectPII(finalText, identity, { detectProperNouns: settings.detectProperNouns === true })
+        .filter(w => !ignoredDetections.has(w.value));
       if (warnings.length > 0) {
         // Auto-redact detected PII in the outbound text
         if (settings.autoRedactDetected !== false) {
@@ -516,6 +519,7 @@
         <span class="ss-ad-type">${w.name}</span>
         <code class="ss-ad-value">${w.value.length > 30 ? w.value.slice(0, 27) + '...' : w.value}</code>
         <span class="ss-ad-hint">${w.hint}</span>
+        <button class="ss-ad-ignore" data-value="${encodeURIComponent(w.value)}" title="Never warn about this again">Ignore</button>
       </div>`
     ).join('');
 
@@ -533,9 +537,22 @@
 
     warningEl.classList.add('visible');
 
-    // Close button
+    // Close button — hides for this session
     warningEl.querySelector('.ss-ad-close').addEventListener('click', () => {
       warningEl.classList.remove('visible');
+    });
+
+    // Ignore buttons — permanently dismiss a specific value
+    warningEl.querySelectorAll('.ss-ad-ignore').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const val = decodeURIComponent(btn.dataset.value);
+        ignoredDetections.add(val);
+        setStorageData('ss_ignored_detections', [...ignoredDetections]);
+        btn.closest('.ss-ad-item').remove();
+        if (!warningEl.querySelector('.ss-ad-item')) {
+          warningEl.classList.remove('visible');
+        }
+      });
     });
 
     // Auto-dismiss after 15 seconds
@@ -1348,6 +1365,7 @@
         ${settings.autoAddDetected !== false
           ? `<button class="ss-ps-add" data-real="${encodeURIComponent(w.value)}" data-fake="${encodeURIComponent(fake)}" data-cat="${w.category}" title="Add mapping: ${displayVal} → ${fake}">+</button>`
           : ''}
+        <button class="ss-ad-ignore" data-value="${encodeURIComponent(w.value)}" title="Never warn about this again">Ignore</button>
       </div>`;
     }).join('');
 
@@ -1410,6 +1428,19 @@
         btn.disabled = true;
       });
     });
+
+    // Ignore buttons — permanently dismiss a specific value
+    preSendWarningEl.querySelectorAll('.ss-ad-ignore').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const val = decodeURIComponent(btn.dataset.value);
+        ignoredDetections.add(val);
+        setStorageData('ss_ignored_detections', [...ignoredDetections]);
+        btn.closest('.ss-ps-item').remove();
+        if (!preSendWarningEl.querySelector('.ss-ps-item')) {
+          preSendWarningEl.classList.remove('visible');
+        }
+      });
+    });
   }
 
   // Replace all occurrences of `real` with `fake` in an input or contenteditable element
@@ -1464,7 +1495,8 @@
       return;
     }
 
-    const warnings = autoDetectPII(text, identity, { detectProperNouns: settings.detectProperNouns === true });
+    const warnings = autoDetectPII(text, identity, { detectProperNouns: settings.detectProperNouns === true })
+      .filter(w => !ignoredDetections.has(w.value));
     if (warnings.length > 0) {
       showPreSendWarning(warnings, target);
     } else if (preSendWarningEl) {
@@ -1541,6 +1573,11 @@
   } else {
     document.addEventListener('DOMContentLoaded', boot);
   }
+
+  // Load permanently-ignored detections from storage
+  getStorageData('ss_ignored_detections').then(data => {
+    if (Array.isArray(data)) ignoredDetections = new Set(data);
+  });
 
   // Also update badge when settings change
   const origCheckReveal = checkRevealToggle;

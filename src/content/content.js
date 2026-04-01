@@ -789,7 +789,9 @@
   // Fetch Interception — scans ALL POST requests with a body.
   // Service-agnostic: doesn't depend on URL patterns.
   // ============================================================
-  const originalFetch = window.fetch;
+  // Use the real fetch captured by early-hook.js (before React stored its reference),
+  // or fall back to whatever window.fetch is now if early-hook.js didn't run.
+  const originalFetch = window.__ssOriginalFetch || window.fetch;
 
   // URLs to never touch (static assets, analytics, etc.)
   const SKIP_URL_PATTERNS = [
@@ -805,7 +807,7 @@
     return SKIP_URL_PATTERNS.some(p => p.test(url));
   }
 
-  window.fetch = async function (url, options) {
+  window.__ssInterceptFetch = async function (url, options) {
     if (!settings.enabled || !hasSubstitutions()) {
       return originalFetch.call(this, url, options);
     }
@@ -868,6 +870,16 @@
 
     return originalFetch.call(this, url, options);
   };
+
+  // Activate the fetch hook. If early-hook.js ran first (world: MAIN, document_start),
+  // it already replaced window.fetch with a wrapper that forwards to __ssInterceptFetch
+  // once __ssReady is true — this catches React/Next.js fetch references stored before
+  // content.js loaded. Otherwise fall back to replacing window.fetch directly.
+  if (window.__ssOriginalFetch) {
+    window.__ssReady = true;
+  } else {
+    window.fetch = window.__ssInterceptFetch;
+  }
 
   // ============================================================
   // XMLHttpRequest Interception — same aggressive approach

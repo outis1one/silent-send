@@ -201,6 +201,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           setGistSyncStatus('Pull failed: ' + r2.reason, 'error');
         } else if (r2.imported) {
           setGistSyncStatus(`Pulled (${r2.time}). Refreshing…`, 'ok');
+          api.runtime.sendMessage({ type: 'vault:unlocked' }).catch(() => {});
           mappings = await Storage.getMappings();
           settings = await Storage.getSettings();
           renderMappings();
@@ -215,6 +216,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       setGistSyncStatus('Pull failed: ' + r.reason, 'error');
     } else if (r.imported) {
       setGistSyncStatus(`Pulled (${r.time}). Refreshing…`, 'ok');
+      api.runtime.sendMessage({ type: 'vault:unlocked' }).catch(() => {});
       mappings = await Storage.getMappings();
       settings = await Storage.getSettings();
       renderMappings();
@@ -258,6 +260,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           setUrlSyncStatus('Pull failed: ' + r2.reason, 'error');
         } else if (r2.imported) {
           setUrlSyncStatus(`Pulled (${r2.time}). Refreshing…`, 'ok');
+          api.runtime.sendMessage({ type: 'vault:unlocked' }).catch(() => {});
           mappings = await Storage.getMappings();
           settings = await Storage.getSettings();
           renderMappings();
@@ -272,6 +275,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       setUrlSyncStatus('Pull failed: ' + r.reason, 'error');
     } else if (r.imported) {
       setUrlSyncStatus(`Pulled (${r.time}). Refreshing…`, 'ok');
+      api.runtime.sendMessage({ type: 'vault:unlocked' }).catch(() => {});
       mappings = await Storage.getMappings();
       settings = await Storage.getSettings();
       renderMappings();

@@ -60,12 +60,18 @@
     const result = await api.storage.local.get(['ss_mappings', 'ss_identity', 'ss_settings']);
     const settings = result.ss_settings || { enabled: true };
 
-    // Check if data is encrypted (locked) — pass empty config
+    // Check if data is encrypted — pass empty config and request decryption
     // The background will send decrypted data via vault:unlocked when ready
     const isLocked = result.ss_mappings?._ssLocalEncrypted ||
                      result.ss_identity?._ssLocalEncrypted;
     const mappings = isLocked ? [] : (result.ss_mappings || []);
     const identityData = isLocked ? {} : (result.ss_identity || {});
+
+    // If data is encrypted but the vault key may already be cached
+    // (e.g. after a sync import), ask the background to push decrypted data
+    if (isLocked) {
+      api.runtime.sendMessage({ type: 'vault:request-unlock' }).catch(() => {});
+    }
 
     // Merge active profiles into a flat identity object for the content script
     const identity = mergeProfiles(identityData);

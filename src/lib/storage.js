@@ -226,7 +226,19 @@ const Storage = {
   },
 
   async saveProfiles(profiles) {
-    await this._writeSecure(KEYS.IDENTITY, { profiles }, { ss_lastModified: Date.now() });
+    // Only advance ss_lastModified if at least one profile contains real PII.
+    // Creating the default empty profile on a fresh install should not count
+    // as "this browser has data" — that would make the pull timestamp check
+    // think remote Gist data is stale and skip the import.
+    const hasRealData = (profiles || []).some(p =>
+      (p.names || []).some(n => n.real?.trim()) ||
+      (p.emails || []).some(e => e.real?.trim()) ||
+      (p.usernames || []).some(u => u.real?.trim()) ||
+      (p.phones || []).some(ph => ph.real?.trim()) ||
+      p.catchAllEmail?.trim()
+    );
+    const extras = hasRealData ? { ss_lastModified: Date.now() } : {};
+    await this._writeSecure(KEYS.IDENTITY, { profiles }, extras);
   },
 
   async addProfile(name) {

@@ -472,6 +472,20 @@ api.alarms.onAlarm.addListener(async (alarm) => {
     const result = await SilentSendSync.performAutoSync();
     if (result.pulled) {
       console.log('[Silent Send] Auto-sync pulled new data');
+      // Broadcast decrypted data to all open content scripts so
+      // substitution works immediately without a page reload.
+      const mappings = await Storage.getMappings();
+      const identity = await Storage.getIdentity();
+      const settings = await Storage.getSettings();
+      const allPatterns = [...BUILTIN_URL_PATTERNS];
+      const customDomains = settings.customDomains || [];
+      for (const domain of customDomains) allPatterns.push(domain + '/*');
+      for (const urlPattern of allPatterns) {
+        const tabs = await api.tabs.query({ url: urlPattern }).catch(() => []);
+        for (const tab of tabs) {
+          api.tabs.sendMessage(tab.id, { type: 'vault:unlocked', mappings, identity, settings }).catch(() => {});
+        }
+      }
     }
     if (result.error) {
       console.warn('[Silent Send] Auto-sync error:', result.error);

@@ -709,6 +709,12 @@ const SilentSendSync = {
     try {
       const data = await this._getAllData();
 
+      // Don't push if this browser has no saved data — it would overwrite
+      // real data on the Gist with an empty payload.
+      if (data.lastModified === 0) {
+        return { success: false, reason: 'Nothing to push — no data has been saved on this browser yet. Pull first.' };
+      }
+
       // Encrypt if enabled
       const encResult = await this._encryptForSync(data);
       if (encResult.needsAuth) {
@@ -745,7 +751,8 @@ const SilentSendSync = {
       }
 
       const json = await resp.json();
-      await api.storage.local.set({ ss_gist_id: json.id });
+      const now = Date.now();
+      await api.storage.local.set({ ss_gist_id: json.id, ss_last_push_time: now, ss_last_push_source: 'gist' });
       return { success: true, gistId: json.id };
     } catch (e) {
       return { success: false, reason: e.message };
@@ -804,9 +811,14 @@ const SilentSendSync = {
       const rawResp = await fetch(file.raw_url);
       let data = JSON.parse(await rawResp.text());
 
-      // Check if new data exists before requiring auth
+      // Check if new data exists before requiring auth.
+      // remoteMod === 0 means the Gist was clobbered by an empty push — treat
+      // as stale rather than skipping so the user sees a useful error.
       const local = await this._getAllData();
-      const remoteMod = data._ssEncrypted ? data.lastModified : data.lastModified;
+      const remoteMod = data.lastModified || 0;
+      if (remoteMod === 0) {
+        return { success: false, reason: 'Gist contains no data (timestamp is 0). Push from the source browser first.' };
+      }
       if (remoteMod <= (local.lastModified || 0)) {
         return { success: true, imported: false };
       }
@@ -838,6 +850,10 @@ const SilentSendSync = {
     if (!url) return { success: false, reason: 'No URL provided.' };
     try {
       const data = await this._getAllData();
+
+      if (data.lastModified === 0) {
+        return { success: false, reason: 'Nothing to push — no data has been saved on this browser yet. Pull first.' };
+      }
 
       const encResult = await this._encryptForSync(data);
       if (encResult.needsAuth) {
@@ -1032,9 +1048,9 @@ const SilentSendSync = {
         const pullResult = await this.pullFromGist(config.gistToken);
         if (pullResult.success && pullResult.imported) pulled = true;
 
-        // Push if local data changed since last push
+        // Push if local data changed since last push (skip if no real data yet)
         const local = await this._getAllData();
-        if (!config.lastPush || local.lastModified > config.lastPush) {
+        if (local.lastModified > 0 && (!config.lastPush || local.lastModified > config.lastPush)) {
           const pushResult = await this.pushToGist(config.gistToken);
           if (pushResult.success) {
             pushed = true;
@@ -1047,9 +1063,9 @@ const SilentSendSync = {
         const pullResult = await this.pullFromUrl({ url: config.url, headers });
         if (pullResult.success && pullResult.imported) pulled = true;
 
-        // Push if local data changed since last push
+        // Push if local data changed since last push (skip if no real data yet)
         const local = await this._getAllData();
-        if (!config.lastPush || local.lastModified > config.lastPush) {
+        if (local.lastModified > 0 && (!config.lastPush || local.lastModified > config.lastPush)) {
           const pushResult = await this.pushToUrl({
             url: config.url,
             method: config.httpMethod || 'PUT',

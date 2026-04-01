@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Silent Send",
-  "version": "0.9.39",
+  "version": "0.9.40",
   "description": "Intercepts personal info and substitutes it with user-defined replacements before sending to AI services.",
   "permissions": [
     "storage",
@@ -15,6 +15,7 @@
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
     "https://copilot.microsoft.com/*",
+    "https://grok.com/*",
     "https://grok.x.ai/*",
     "https://x.com/i/grok*",
     "https://gemini.google.com/*",
@@ -43,6 +44,36 @@
         "https://chatgpt.com/*",
         "https://chat.openai.com/*",
         "https://copilot.microsoft.com/*",
+        "https://grok.com/*",
+        "https://grok.x.ai/*",
+        "https://x.com/i/grok*",
+        "https://gemini.google.com/*",
+        "https://www.perplexity.ai/*",
+        "https://copilot.microsoft.com/*",
+        "https://chat.deepseek.com/*",
+        "https://huggingface.co/chat/*",
+        "https://poe.com/*",
+        "https://github.com/*",
+        "https://gitlab.com/*",
+        "https://www.reddit.com/*",
+        "https://old.reddit.com/*",
+        "https://stackoverflow.com/*",
+        "https://pastebin.com/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": ["src/content/early-hook.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://claude.ai/*",
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://copilot.microsoft.com/*",
+        "https://grok.com/*",
         "https://grok.x.ai/*",
         "https://x.com/i/grok*",
         "https://gemini.google.com/*",
@@ -102,7 +133,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["src/content/content.js", "src/content/early-hook.js", "src/lib/document-scanner.js"],
+      "resources": ["src/content/content.js", "src/lib/document-scanner.js"],
       "matches": ["<all_urls>"]
     }
   ]

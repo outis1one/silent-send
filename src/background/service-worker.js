@@ -184,6 +184,23 @@ const messageHandlers = {
     sendResponse({ locked });
   },
 
+  // Content script requests decrypted data on page load when it sees
+  // encrypted storage but the key is already cached (e.g. after a sync import).
+  async 'vault:request-unlock'(_message, sender) {
+    const locked = await Storage.isLocked();
+    if (locked) return; // key not available — user must unlock via popup
+
+    const mappings = await Storage.getMappings();
+    const identity = await Storage.getIdentity();
+    const settings = await Storage.getSettings();
+    api.tabs.sendMessage(sender.tab.id, {
+      type: 'vault:unlocked',
+      mappings,
+      identity,
+      settings,
+    }).catch(() => {});
+  },
+
   async 'vault:unlocked'() {
     // User unlocked the vault — clear the LOCK badge and refresh icon
     api.action.setBadgeText({ text: '' });

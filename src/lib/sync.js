@@ -901,7 +901,7 @@ const SilentSendSync = {
     const result = await api.storage.local.get('ss_lastModified');
     return {
       version: '1',
-      lastModified: result.ss_lastModified || Date.now(),
+      lastModified: result.ss_lastModified || 0,
       identity: identity || {},
       mappings: mappings || [],
       settings: settings || {},
@@ -924,9 +924,12 @@ const SilentSendSync = {
     }
 
     // Metadata stays plaintext
+    const now = Date.now();
     await api.storage.local.set({
       ss_lastModified: data.lastModified,
-      ss_sync_notification: { source, time: Date.now() },
+      ss_sync_notification: { source, time: now },
+      ss_last_pull_time: now,
+      ss_last_pull_source: source,
     });
   },
 

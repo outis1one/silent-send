@@ -161,9 +161,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   // --- GitHub Gist sync ---
   // Restore saved token (session only — never persisted to storage)
   {
-    const stored = await api.storage.local.get('ss_gist_id');
+    const stored = await api.storage.local.get(['ss_gist_id', 'ss_last_pull_time', 'ss_last_pull_source']);
     if (stored.ss_gist_id) {
-      setGistSyncStatus(`Gist ID: ${stored.ss_gist_id.slice(0, 12)}…`, 'ok');
+      let status = `Gist ID: ${stored.ss_gist_id.slice(0, 12)}…`;
+      if (stored.ss_last_pull_time && stored.ss_last_pull_source === 'gist') {
+        status += ` · Last pulled: ${new Date(stored.ss_last_pull_time).toLocaleString()}`;
+      }
+      setGistSyncStatus(status, 'ok');
     }
   }
 
@@ -197,6 +201,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           setGistSyncStatus('Pull failed: ' + r2.reason, 'error');
         } else if (r2.imported) {
           setGistSyncStatus(`Pulled (${r2.time}). Refreshing…`, 'ok');
+          api.runtime.sendMessage({ type: 'vault:unlocked' }).catch(() => {});
           mappings = await Storage.getMappings();
           settings = await Storage.getSettings();
           renderMappings();
@@ -211,6 +216,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       setGistSyncStatus('Pull failed: ' + r.reason, 'error');
     } else if (r.imported) {
       setGistSyncStatus(`Pulled (${r.time}). Refreshing…`, 'ok');
+      api.runtime.sendMessage({ type: 'vault:unlocked' }).catch(() => {});
       mappings = await Storage.getMappings();
       settings = await Storage.getSettings();
       renderMappings();
@@ -254,6 +260,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           setUrlSyncStatus('Pull failed: ' + r2.reason, 'error');
         } else if (r2.imported) {
           setUrlSyncStatus(`Pulled (${r2.time}). Refreshing…`, 'ok');
+          api.runtime.sendMessage({ type: 'vault:unlocked' }).catch(() => {});
           mappings = await Storage.getMappings();
           settings = await Storage.getSettings();
           renderMappings();
@@ -268,6 +275,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       setUrlSyncStatus('Pull failed: ' + r.reason, 'error');
     } else if (r.imported) {
       setUrlSyncStatus(`Pulled (${r.time}). Refreshing…`, 'ok');
+      api.runtime.sendMessage({ type: 'vault:unlocked' }).catch(() => {});
       mappings = await Storage.getMappings();
       settings = await Storage.getSettings();
       renderMappings();

@@ -58,20 +58,14 @@
   // Load mappings and settings, then inject into page
   async function init() {
     const result = await api.storage.local.get(['ss_mappings', 'ss_identity', 'ss_settings']);
-    const settings = result.ss_settings || { enabled: true };
 
-    // Check if data is encrypted — pass empty config and request decryption
-    // The background will send decrypted data via vault:unlocked when ready
+    // Check if data is encrypted — pass empty config; decrypted data arrives via vault:unlocked
     const isLocked = result.ss_mappings?._ssLocalEncrypted ||
-                     result.ss_identity?._ssLocalEncrypted;
+                     result.ss_identity?._ssLocalEncrypted ||
+                     result.ss_settings?._ssLocalEncrypted;
     const mappings = isLocked ? [] : (result.ss_mappings || []);
     const identityData = isLocked ? {} : (result.ss_identity || {});
-
-    // If data is encrypted but the vault key may already be cached
-    // (e.g. after a sync import), ask the background to push decrypted data
-    if (isLocked) {
-      api.runtime.sendMessage({ type: 'vault:request-unlock' }).catch(() => {});
-    }
+    const settings = isLocked ? { enabled: true } : (result.ss_settings || { enabled: true });
 
     // Merge active profiles into a flat identity object for the content script
     const identity = mergeProfiles(identityData);
@@ -84,12 +78,47 @@
     await new Promise(resolve => { docScannerScript.onload = resolve; docScannerScript.onerror = resolve; });
     docScannerScript.remove();
 
+    // Register the runtime message listener BEFORE injecting content.js and BEFORE
+    // sending vault:request-unlock. This prevents two races:
+    // 1. The background could respond to vault:request-unlock before the listener
+    //    is registered (if the service worker is already warm), dropping the message.
+    // 2. window.postMessage from the listener must reach content.js's message handler,
+    //    which is only registered after content.js finishes executing.
+    // Solution: register the listener here, but send vault:request-unlock only inside
+    // script.onload (after content.js has fully executed).
+    api.runtime.onMessage.addListener(async (message) => {
+      if (message.type === 'settings:updated') {
+        window.postMessage({
+          type: 'ss:config-updated',
+          settings: message.settings,
+        }, '*');
+      }
+
+      // Vault unlocked — background sends pre-decrypted data
+      if (message.type === 'vault:unlocked') {
+        window.postMessage({
+          type: 'ss:config-updated',
+          mappings: message.mappings || [],
+          identity: message.identity || {},
+          settings: message.settings || {},
+        }, '*');
+      }
+    });
+
     // Inject the main interception script into the page's world
     const script = document.createElement('script');
     script.setAttribute('data-ss-config', JSON.stringify({ mappings, identity, settings }));
     script.src = api.runtime.getURL('src/content/content.js');
     (document.head || document.documentElement).appendChild(script);
-    script.onload = () => script.remove();
+    script.onload = () => {
+      script.remove();
+      // content.js has fully executed — its window.message listener is now live.
+      // Safe to request decrypted data; the vault:unlocked response will be
+      // delivered to content.js without a race.
+      if (isLocked) {
+        api.runtime.sendMessage({ type: 'vault:request-unlock' }).catch(() => {});
+      }
+    };
 
     // Listen for substitution events from the page script
     window.addEventListener('message', async (event) => {
@@ -145,26 +174,6 @@
         if (msg.mappings || msg.identity || msg.settings) {
           window.postMessage(msg, '*');
         }
-      }
-    });
-
-    // Listen for settings updates and vault unlock from background
-    api.runtime.onMessage.addListener(async (message) => {
-      if (message.type === 'settings:updated') {
-        window.postMessage({
-          type: 'ss:config-updated',
-          settings: message.settings,
-        }, '*');
-      }
-
-      // Vault unlocked — background sends pre-decrypted data
-      if (message.type === 'vault:unlocked') {
-        window.postMessage({
-          type: 'ss:config-updated',
-          mappings: message.mappings || [],
-          identity: message.identity || {},
-          settings: message.settings || {},
-        }, '*');
       }
     });
 

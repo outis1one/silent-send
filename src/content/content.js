@@ -50,7 +50,7 @@
     const sorted = [...maps].sort((a, b) => b.real.length - a.real.length);
 
     for (const m of sorted) {
-      if (!m.enabled || !m.real || !m.substitute) continue;
+      if (!m.enabled || !m.real?.trim() || !m.substitute?.trim()) continue;
       const escaped = esc(m.real);
       const regex = new RegExp(escaped, m.caseSensitive ? 'g' : 'gi');
       let match;
@@ -70,7 +70,7 @@
     let result = text;
     const sorted = [...maps].sort((a, b) => b.substitute.length - a.substitute.length);
     for (const m of sorted) {
-      if (!m.enabled || !m.real || !m.substitute) continue;
+      if (!m.enabled || !m.real?.trim() || !m.substitute?.trim()) continue;
       const escaped = esc(m.substitute);
       const regex = new RegExp(escaped, m.caseSensitive ? 'g' : 'gi');
       result = result.replace(regex, m.real);
@@ -1130,6 +1130,7 @@
 
       for (const p of pairs) {
         const searchTerm = settings.revealMode ? p.to : p.from;
+        if (!searchTerm?.trim()) continue;
         const escaped = esc(searchTerm);
         // Add word boundaries when the term starts/ends with word chars to
         // prevent partial-word matches (e.g. "aud" inside "Claude")

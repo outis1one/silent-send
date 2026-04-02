@@ -21,7 +21,7 @@ const SubstitutionEngine = {
     );
 
     for (const mapping of sorted) {
-      if (!mapping.enabled || !mapping.real || !mapping.substitute) continue;
+      if (!mapping.enabled || !mapping.real?.trim() || !mapping.substitute?.trim()) continue;
 
       const escaped = this._escapeRegex(mapping.real);
       const regex = new RegExp(escaped, mapping.caseSensitive ? 'g' : 'gi');
@@ -54,7 +54,7 @@ const SubstitutionEngine = {
     );
 
     for (const mapping of sorted) {
-      if (!mapping.enabled || !mapping.real || !mapping.substitute) continue;
+      if (!mapping.enabled || !mapping.real?.trim() || !mapping.substitute?.trim()) continue;
 
       const escaped = this._escapeRegex(mapping.substitute);
       const regex = new RegExp(escaped, mapping.caseSensitive ? 'g' : 'gi');
@@ -71,7 +71,7 @@ const SubstitutionEngine = {
     const found = [];
 
     for (const mapping of mappings) {
-      if (!mapping.enabled || !mapping.real) continue;
+      if (!mapping.enabled || !mapping.real?.trim()) continue;
 
       const escaped = this._escapeRegex(mapping.real);
       const regex = new RegExp(escaped, mapping.caseSensitive ? 'g' : 'gi');
@@ -103,7 +103,7 @@ const SubstitutionEngine = {
     // Collect all match positions in the original text
     const matches = [];
     for (const mapping of sorted) {
-      if (!mapping.enabled || !mapping.real || !mapping.substitute) continue;
+      if (!mapping.enabled || !mapping.real?.trim() || !mapping.substitute?.trim()) continue;
 
       const escaped = this._escapeRegex(mapping.real);
       const regex = new RegExp(escaped, mapping.caseSensitive ? 'g' : 'gi');

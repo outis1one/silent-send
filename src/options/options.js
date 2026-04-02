@@ -1814,11 +1814,12 @@ async function applyBulkImport() {
     await Storage.updateProfile(profile.id, profile);
   }
 
-  // Add mappings
+  // Add mappings — skip any with blank/whitespace-only real values
   for (const m of result.mappings) {
+    if (!m.real?.trim()) continue;
     await Storage.addMapping({
-      real: m.real,
-      substitute: m.substitute || '',
+      real: m.real.trim(),
+      substitute: m.substitute?.trim() || '',
       category: m.category || 'general',
       caseSensitive: false,
     });

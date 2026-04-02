@@ -825,67 +825,74 @@
   }
 
   window.__ssInterceptFetch = async function (url, options) {
-    if (!settings.enabled || !hasSubstitutions()) {
+    // Top-level guard: any unhandled error must never break the original request.
+    try {
+      if (!settings.enabled || !hasSubstitutions()) {
+        return originalFetch.call(this, url, options);
+      }
+
+      const urlStr = typeof url === 'string' ? url : url?.url || '';
+      const method = (options?.method || 'GET').toUpperCase();
+
+      // Only intercept POST/PUT/PATCH
+      if (
+        (method === 'POST' || method === 'PUT' || method === 'PATCH') &&
+        options?.body && !shouldSkipUrl(urlStr)
+      ) {
+        // FormData body — scan file uploads via DocumentScanner
+        if (options.body instanceof FormData && typeof globalThis.DocumentScanner !== 'undefined') {
+          try {
+            const scannedForm = await scanFormData(options.body);
+            if (scannedForm) {
+              options = { ...options, body: scannedForm.formData };
+              if (scannedForm.replacements.length > 0) {
+                notifySubstitutions(scannedForm.replacements);
+                console.log(
+                  `[Silent Send] Substituted ${scannedForm.replacements.length} value(s) in file upload to ${urlStr}`
+                );
+              }
+            }
+          } catch (e) {
+            console.warn('[Silent Send] FormData scan failed:', e);
+          }
+        }
+
+        // String body — JSON or raw text
+        if (typeof options.body === 'string') {
+          try {
+            // Try JSON
+            const body = JSON.parse(options.body);
+            const { modified, replacements } = processBody(body);
+
+            if (modified) {
+              options = { ...options, body: JSON.stringify(body) };
+              notifySubstitutions(replacements);
+              console.log(
+                `[Silent Send] Substituted ${replacements.length} value(s) in ${urlStr}`
+              );
+            }
+          } catch (e) {
+            // Not JSON — try raw string substitution (form data, etc.)
+            if (options.body.length > MIN_STRING_LENGTH) {
+              const result = substituteAll(options.body);
+              if (result.modified) {
+                options = { ...options, body: result.text };
+                notifySubstitutions(result.replacements);
+                console.log(
+                  `[Silent Send] Substituted ${result.replacements.length} value(s) in form body`
+                );
+              }
+            }
+          }
+        }
+      }
+
+      return originalFetch.call(this, url, options);
+    } catch (e) {
+      // Something went wrong in Silent Send — never block the original request
+      console.warn('[Silent Send] Fetch interceptor error, passing through:', e);
       return originalFetch.call(this, url, options);
     }
-
-    const urlStr = typeof url === 'string' ? url : url?.url || '';
-    const method = (options?.method || 'GET').toUpperCase();
-
-    // Only intercept POST/PUT/PATCH
-    if (
-      (method === 'POST' || method === 'PUT' || method === 'PATCH') &&
-      options?.body && !shouldSkipUrl(urlStr)
-    ) {
-      // FormData body — scan file uploads via DocumentScanner
-      if (options.body instanceof FormData && typeof globalThis.DocumentScanner !== 'undefined') {
-        try {
-          const scannedForm = await scanFormData(options.body);
-          if (scannedForm) {
-            options = { ...options, body: scannedForm.formData };
-            if (scannedForm.replacements.length > 0) {
-              notifySubstitutions(scannedForm.replacements);
-              console.log(
-                `[Silent Send] Substituted ${scannedForm.replacements.length} value(s) in file upload to ${urlStr}`
-              );
-            }
-          }
-        } catch (e) {
-          console.warn('[Silent Send] FormData scan failed:', e);
-        }
-      }
-
-      // String body — JSON or raw text
-      if (typeof options.body === 'string') {
-        try {
-          // Try JSON
-          const body = JSON.parse(options.body);
-          const { modified, replacements } = processBody(body);
-
-          if (modified) {
-            options = { ...options, body: JSON.stringify(body) };
-            notifySubstitutions(replacements);
-            console.log(
-              `[Silent Send] Substituted ${replacements.length} value(s) in ${urlStr}`
-            );
-          }
-        } catch (e) {
-          // Not JSON — try raw string substitution (form data, etc.)
-          if (options.body.length > MIN_STRING_LENGTH) {
-            const result = substituteAll(options.body);
-            if (result.modified) {
-              options = { ...options, body: result.text };
-              notifySubstitutions(result.replacements);
-              console.log(
-                `[Silent Send] Substituted ${result.replacements.length} value(s) in form body`
-              );
-            }
-          }
-        }
-      }
-    }
-
-    return originalFetch.call(this, url, options);
   };
 
   // Activate the fetch hook. If early-hook.js ran first (world: MAIN, document_start),

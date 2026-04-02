@@ -613,7 +613,7 @@ const SilentSendSync = {
 
       if (!force) {
         const local = await this._getAllData();
-        if (local.lastModified && local.lastModified >= data.lastModified) {
+        if (local.lastModified && local.lastModified >= data.lastModified && this._hasRealLocalData(local)) {
           return {
             success: false,
             skipped: true,
@@ -676,7 +676,7 @@ const SilentSendSync = {
 
       // Check if there's new data before requiring auth
       const local = await this._getAllData();
-      if (local.lastModified && local.lastModified >= syncMeta.lastModified) return null;
+      if (local.lastModified && local.lastModified >= syncMeta.lastModified && this._hasRealLocalData(local)) return null;
 
       // New data exists — reassemble
       const chunkKeys = Array.from({ length: syncMeta.chunks }, (_, i) => SYNC_KEY_PREFIX + i);
@@ -819,7 +819,7 @@ const SilentSendSync = {
       if (remoteMod === 0) {
         return { success: false, reason: 'Gist contains no data (timestamp is 0). Push from the source browser first.' };
       }
-      if (remoteMod <= (local.lastModified || 0)) {
+      if (remoteMod <= (local.lastModified || 0) && this._hasRealLocalData(local)) {
         return { success: true, imported: false };
       }
 
@@ -882,7 +882,7 @@ const SilentSendSync = {
 
       const local = await this._getAllData();
       const remoteMod = data._ssEncrypted ? data.lastModified : data.lastModified;
-      if (remoteMod <= (local.lastModified || 0)) {
+      if (remoteMod <= (local.lastModified || 0) && this._hasRealLocalData(local)) {
         return { success: true, imported: false };
       }
 
@@ -907,6 +907,25 @@ const SilentSendSync = {
   // ----------------------------------------------------------------
   // Internal helpers
   // ----------------------------------------------------------------
+
+  /**
+   * Returns true if local storage contains real user data (identity or mappings).
+   * Used to bypass the lastModified timestamp check on a fresh install where
+   * saveSettings() has written a recent timestamp even though there is no PII
+   * configured yet. Without this, a fresh browser after restart would always
+   * skip pulls because its saveSettings timestamp > the remote's older timestamp.
+   */
+  _hasRealLocalData(local) {
+    if ((local.mappings || []).length > 0) return true;
+    const profiles = local.identity?.profiles || [];
+    return profiles.some(p =>
+      (p.names || []).some(n => n.real?.trim()) ||
+      (p.emails || []).some(e => e.real?.trim()) ||
+      (p.usernames || []).some(u => u.real?.trim()) ||
+      (p.phones || []).some(ph => ph.real?.trim()) ||
+      p.catchAllEmail?.trim()
+    );
+  },
 
   async _getAllData() {
     // Use dynamic import to avoid circular dependency

@@ -4,7 +4,6 @@ import SilentSendSync from '../lib/sync.js';
 import VersionHistory from '../lib/version-history.js';
 import ImportParser from '../lib/import-parser.js';
 import SilentSendMerge from '../lib/merge.js';
-import OrgPolicy from '../lib/org-policy.js';
 import TamperGuard from '../lib/tamper-guard.js';
 import api from '../lib/browser-polyfill.js';
 
@@ -40,7 +39,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   await initAutoSyncUI();
   await initVersionHistoryUI();
   await initDeviceDashboard();
-  await initOrgUI();
   await initTamperUI();
   await checkConflicts();
 
@@ -1442,99 +1440,6 @@ async function renderDevices() {
       renderDevices();
     });
   });
-}
-
-// ----------------------------------------------------------------
-// Organization UI
-// ----------------------------------------------------------------
-
-async function initOrgUI() {
-  const inOrg = await OrgPolicy.isInOrg();
-  if (inOrg) {
-    await showOrgJoined();
-  } else {
-    showOrgNotJoined();
-  }
-
-  $('#btnJoinOrgCode').addEventListener('click', async () => {
-    const code = $('#orgInviteCode').value.trim();
-    if (!code) { setOrgStatus('Enter an invite code.', 'warn'); return; }
-    setOrgStatus('Joining...', 'neutral');
-    const result = await OrgPolicy.joinOrg({ inviteCode: code });
-    if (result.success) {
-      setOrgStatus(`Joined ${result.orgName}.`, 'ok');
-      await showOrgJoined();
-    } else {
-      setOrgStatus('Failed: ' + result.reason, 'error');
-    }
-  });
-
-  $('#btnJoinOrgUrl').addEventListener('click', async () => {
-    const url = $('#orgPolicyUrl').value.trim();
-    if (!url) { setOrgStatus('Enter a policy URL.', 'warn'); return; }
-    setOrgStatus('Joining...', 'neutral');
-    const result = await OrgPolicy.joinOrg({ policyUrl: url });
-    if (result.success) {
-      setOrgStatus(`Joined ${result.orgName}.`, 'ok');
-      await showOrgJoined();
-    } else {
-      setOrgStatus('Failed: ' + result.reason, 'error');
-    }
-  });
-
-  $('#btnLeaveOrg').addEventListener('click', async () => {
-    // Check tamper protection
-    if (await TamperGuard.isActionProtected('changeOrgPolicy')) {
-      const pw = await promptAdminPassword('Leave organization');
-      if (!pw) return;
-      const auth = await TamperGuard.verify(pw);
-      if (!auth) { setOrgStatus('Wrong admin password.', 'error'); return; }
-    }
-    if (!confirm('Leave this organization? Org-required mappings will be removed.')) return;
-    await OrgPolicy.leaveOrg();
-    showOrgNotJoined();
-    setOrgStatus('Left organization.', 'neutral');
-  });
-}
-
-async function showOrgJoined() {
-  $('#orgNotJoined').style.display = 'none';
-  $('#orgJoined').style.display = 'block';
-
-  const config = await OrgPolicy.getOrgConfig();
-  const policy = await OrgPolicy.getPolicy();
-  if (config) {
-    $('#orgNameDisplay').textContent = config.orgName;
-    $('#orgPolicyVersion').textContent = `v${policy?.version || '?'}`;
-  }
-
-  const compliance = await OrgPolicy.checkCompliance();
-  const statusEl = $('#orgComplianceStatus');
-  if (compliance.compliant) {
-    statusEl.innerHTML = '<span style="color:#10b981">&#10003; Compliant — all required fields configured</span>';
-  } else {
-    statusEl.innerHTML = `<span style="color:#b45309">Missing: ${compliance.missing.join(', ')}</span>`;
-  }
-
-  const reqMappings = policy?.requiredMappings || [];
-  const reqEl = $('#orgRequiredMappings');
-  if (reqMappings.length > 0) {
-    reqEl.textContent = `${reqMappings.length} required mapping(s) enforced by org policy`;
-  } else {
-    reqEl.textContent = '';
-  }
-}
-
-function showOrgNotJoined() {
-  $('#orgNotJoined').style.display = 'block';
-  $('#orgJoined').style.display = 'none';
-}
-
-function setOrgStatus(msg, type) {
-  const el = $('#orgStatus');
-  if (!el) return;
-  el.textContent = msg;
-  el.style.color = type === 'ok' ? '#10b981' : type === 'warn' ? '#f59e0b' : type === 'error' ? '#dc2626' : '#6b7280';
 }
 
 // ----------------------------------------------------------------

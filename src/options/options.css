@@ -80,7 +80,7 @@ header h1 { font-size: 24px; font-weight: 600; }
   text-transform: uppercase; letter-spacing: 0.5px;
   color: #6b7280; padding: 8px 10px; border-bottom: 1px solid #e5e7eb;
 }
-.mapping-table td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mapping-table td { word-break: break-all; }
 .mapping-table td {
   padding: 8px 10px; border-bottom: 1px solid #f3f4f6; font-size: 13px;
 }

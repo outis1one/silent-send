@@ -1406,21 +1406,17 @@
         const fake = decodeURIComponent(btn.dataset.fake);
         const cat = btn.dataset.cat || 'general';
 
-        // Add to mappings via storage
-        const result = await getStorageData('ss_mappings');
-        const currentMappings = result || [];
-        currentMappings.push({
-          id: crypto.randomUUID(),
-          real, substitute: fake,
-          category: cat,
-          caseSensitive: false,
-          enabled: true,
-          createdAt: Date.now(),
-        });
-        await setStorageData('ss_mappings', currentMappings);
+        // Immediately dismiss this notification item (same as ignore)
+        btn.closest('.ss-ps-item').remove();
+        if (!preSendWarningEl.querySelector('.ss-ps-item')) {
+          preSendWarningEl.classList.remove('visible');
+        }
 
-        // Update local mappings so the fetch interceptor uses them immediately
-        mappings = currentMappings;
+        // Add to mappings via background script (handles encryption)
+        addMappingViaBackground({ real, substitute: fake, category: cat })
+          .then(updatedMappings => {
+            if (updatedMappings.length) mappings = updatedMappings;
+          });
 
         // Replace the PII value in the current input right now
         if (inputEl) {
@@ -1429,11 +1425,6 @@
           if (inputScanTimer) clearTimeout(inputScanTimer);
           inputScanTimer = setTimeout(() => scanInputForPII(inputEl), 150);
         }
-
-        // Visual feedback
-        btn.textContent = '\u2714';
-        btn.style.color = '#4ade80';
-        btn.disabled = true;
       });
     });
 
@@ -1491,6 +1482,21 @@
 
   function setStorageData(key, value) {
     window.postMessage({ type: 'ss:storage-set', key, value }, '*');
+  }
+
+  function addMappingViaBackground(mapping) {
+    return new Promise(resolve => {
+      const id = 'ss-add-' + Math.random();
+      const handler = (event) => {
+        if (event.data?.type === 'ss:add-mapping-result' && event.data.id === id) {
+          window.removeEventListener('message', handler);
+          resolve(event.data.mappings || []);
+        }
+      };
+      window.addEventListener('message', handler);
+      window.postMessage({ type: 'ss:add-mapping', mapping, id }, '*');
+      setTimeout(() => { window.removeEventListener('message', handler); resolve([]); }, 2000);
+    });
   }
 
   // Scan input on type and paste

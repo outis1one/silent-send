@@ -280,7 +280,7 @@
     // 4. Auto-detect: scan the FINAL text for unconfigured PII
     //    Auto-redact if enabled, otherwise just warn
     if (settings.autoDetect !== false) {
-      const warnings = autoDetectPII(finalText, identity, { detectProperNouns: settings.detectProperNouns === true })
+      const warnings = autoDetectPII(finalText, identity, { detectProperNouns: settings.detectProperNouns === true, mappings })
         .filter(w => !ignoredDetections.has(w.value));
       if (warnings.length > 0) {
         // Auto-redact detected PII in the outbound text
@@ -470,6 +470,14 @@
       });
       addAll(ident.names); addAll(ident.emails);
       addAll(ident.usernames); addAll(ident.hostnames); addAll(ident.phones);
+    }
+    // Also skip values covered by mappings (both real and substitute)
+    if (opts?.mappings) {
+      for (const m of opts.mappings) {
+        if (!m.enabled) continue;
+        if (m.real) configured.add(m.real.toLowerCase());
+        if (m.substitute) configured.add(m.substitute.toLowerCase());
+      }
     }
 
     const findings = [];
@@ -1412,7 +1420,19 @@
           preSendWarningEl.classList.remove('visible');
         }
 
-        // Add to mappings via background script (handles encryption)
+        // Optimistically add to local mappings so re-scan skips this value
+        const tempMapping = {
+          id: crypto.randomUUID(),
+          real, substitute: fake,
+          category: cat,
+          caseSensitive: false,
+          enabled: true,
+          createdAt: Date.now(),
+        };
+        mappings = [...mappings, tempMapping];
+
+        // Persist via background script (handles encryption);
+        // update local mappings with the authoritative list on success
         addMappingViaBackground({ real, substitute: fake, category: cat })
           .then(updatedMappings => {
             if (updatedMappings.length) mappings = updatedMappings;
@@ -1509,7 +1529,7 @@
       return;
     }
 
-    const warnings = autoDetectPII(text, identity, { detectProperNouns: settings.detectProperNouns === true })
+    const warnings = autoDetectPII(text, identity, { detectProperNouns: settings.detectProperNouns === true, mappings })
       .filter(w => !ignoredDetections.has(w.value));
     if (warnings.length > 0) {
       showPreSendWarning(warnings, target);

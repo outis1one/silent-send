@@ -193,6 +193,26 @@
       if (event.data?.type === 'ss:storage-set') {
         await api.storage.local.set({ [event.data.key]: event.data.value });
       }
+
+      if (event.data?.type === 'ss:add-mapping') {
+        try {
+          const response = await api.runtime.sendMessage({
+            type: 'add:mapping',
+            mapping: event.data.mapping,
+          });
+          window.postMessage({
+            type: 'ss:add-mapping-result',
+            id: event.data.id,
+            mappings: response?.mappings || [],
+          }, '*');
+        } catch {
+          window.postMessage({
+            type: 'ss:add-mapping-result',
+            id: event.data.id,
+            mappings: [],
+          }, '*');
+        }
+      }
     });
   }
 

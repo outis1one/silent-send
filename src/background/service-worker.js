@@ -138,6 +138,12 @@ const messageHandlers = {
     sendResponse({ mappings });
   },
 
+  async 'add:mapping'(message, _sender, sendResponse) {
+    const newMapping = await Storage.addMapping(message.mapping);
+    const mappings = await Storage.getMappings();
+    sendResponse({ mapping: newMapping, mappings });
+  },
+
   async 'get:settings'(_message, _sender, sendResponse) {
     const settings = await Storage.getSettings();
     sendResponse({ settings });

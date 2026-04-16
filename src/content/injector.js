@@ -15,6 +15,17 @@
   if (window.__silentSendInjected) return;
   window.__silentSendInjected = true;
 
+  // Skip Claude Code (web) entirely. Its tool-call traffic shares the HTTP
+  // surface with user messages; any selective walker becomes brittle the
+  // moment Anthropic changes a field name. Leaving the app untouched is the
+  // robust choice — the user handles redaction manually here.
+  if (
+    location.hostname === 'claude.ai' &&
+    /^\/code(\/|$)/.test(location.pathname)
+  ) {
+    return;
+  }
+
   // Merge active profiles into flat identity object
   function mergeProfiles(data) {
     const profiles = data?.profiles || [];

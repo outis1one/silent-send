@@ -9,19 +9,6 @@
  * because sites like claude.ai have strict CSP that blocks inline scripts.
  */
 (function () {
-  // Claude Code (claude.ai/code) streams real file paths, shell commands, and
-  // tool-call traffic through the same HTTP surface as user messages. Any
-  // substitution there corrupts tool execution. We deliberately stay out of
-  // it entirely so the extension stays robust to API shape changes — the user
-  // handles redaction manually on this one app.
-  if (
-    location.hostname === 'claude.ai' &&
-    /^\/code(\/|$)/.test(location.pathname)
-  ) {
-    window.__ssSkipHost = true;
-    return;
-  }
-
   window.__ssOriginalFetch = window.fetch;
   window.__ssOriginalXHROpen = XMLHttpRequest.prototype.open;
   window.__ssOriginalXHRSend = XMLHttpRequest.prototype.send;

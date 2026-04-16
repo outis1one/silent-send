@@ -755,6 +755,74 @@
   }
 
   // ============================================================
+  // Claude Code (claude.ai/code) — narrow walker
+  //
+  // The web Claude Code app streams tool-call traffic (file paths, shell
+  // commands, GitHub URLs) through the same API as user messages. Deep-walking
+  // every string corrupts that traffic and makes tools fail. Instead we only
+  // substitute at paths that carry user-typed input:
+  //   - top-level `prompt` (classic claude.ai chat field)
+  //   - `attachments[].extracted_content` and `.file_name` (pasted content)
+  //   - `messages[].content` / content parts where role === 'user'
+  // Anything outside these paths — tool_use, tool_result, system, tools,
+  // metadata, IDs — passes through untouched.
+  // ============================================================
+  function isClaudeCode() {
+    return location.hostname === 'claude.ai' && /^\/code(\/|$)/.test(location.pathname);
+  }
+
+  function processBodyClaudeCode(body) {
+    let modified = false;
+    const allReplacements = [];
+
+    function processString(s) {
+      if (typeof s !== 'string' || s.length < MIN_STRING_LENGTH) return s;
+      const r = substituteAll(s);
+      if (r.modified) {
+        allReplacements.push(...r.replacements);
+        modified = true;
+        return r.text;
+      }
+      return s;
+    }
+
+    if (body && typeof body === 'object') {
+      if (typeof body.prompt === 'string') body.prompt = processString(body.prompt);
+      if (typeof body.input === 'string') body.input = processString(body.input);
+
+      if (Array.isArray(body.attachments)) {
+        for (const att of body.attachments) {
+          if (!att || typeof att !== 'object') continue;
+          if (typeof att.extracted_content === 'string') {
+            att.extracted_content = processString(att.extracted_content);
+          }
+          if (typeof att.file_name === 'string') {
+            att.file_name = processString(att.file_name);
+          }
+        }
+      }
+
+      if (Array.isArray(body.messages)) {
+        for (const msg of body.messages) {
+          if (!msg || msg.role !== 'user') continue;
+          if (typeof msg.content === 'string') {
+            msg.content = processString(msg.content);
+          } else if (Array.isArray(msg.content)) {
+            for (const part of msg.content) {
+              // Only text parts — never tool_use / tool_result / image payloads
+              if (part?.type === 'text' && typeof part.text === 'string') {
+                part.text = processString(part.text);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return { modified, replacements: allReplacements };
+  }
+
+  // ============================================================
   // Check if we have anything to substitute
   // ============================================================
   // Check if the user has configured anything at all.
@@ -879,7 +947,9 @@
           try {
             // Try JSON
             const body = JSON.parse(options.body);
-            const { modified, replacements } = processBody(body);
+            const { modified, replacements } = isClaudeCode()
+              ? processBodyClaudeCode(body)
+              : processBody(body);
 
             if (modified) {
               options = { ...options, body: JSON.stringify(body) };
@@ -889,8 +959,10 @@
               );
             }
           } catch (e) {
-            // Not JSON — try raw string substitution (form data, etc.)
-            if (options.body.length > MIN_STRING_LENGTH) {
+            // Not JSON — try raw string substitution (form data, etc.).
+            // Skip on claude.ai/code: raw bodies there are typically tool
+            // traffic, not user input.
+            if (options.body.length > MIN_STRING_LENGTH && !isClaudeCode()) {
               const result = substituteAll(options.body);
               if (result.modified) {
                 options = { ...options, body: result.text };
@@ -944,17 +1016,22 @@
     ) {
       try {
         const parsed = JSON.parse(body);
-        const { modified, replacements } = processBody(parsed);
+        const { modified, replacements } = isClaudeCode()
+          ? processBodyClaudeCode(parsed)
+          : processBody(parsed);
         if (modified) {
           body = JSON.stringify(parsed);
           notifySubstitutions(replacements);
         }
       } catch (e) {
-        // Not JSON — raw string
-        const result = substituteAll(body);
-        if (result.modified) {
-          body = result.text;
-          notifySubstitutions(result.replacements);
+        // Not JSON — raw string. Skip on claude.ai/code; raw bodies there
+        // are typically tool traffic, not user input.
+        if (!isClaudeCode()) {
+          const result = substituteAll(body);
+          if (result.modified) {
+            body = result.text;
+            notifySubstitutions(result.replacements);
+          }
         }
       }
     }

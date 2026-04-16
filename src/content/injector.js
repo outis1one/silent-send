@@ -15,15 +15,6 @@
   if (window.__silentSendInjected) return;
   window.__silentSendInjected = true;
 
-  // Skip Claude Code (web). Its tool-call traffic carries real paths/commands
-  // that must reach the runtime verbatim — substitution breaks execution.
-  if (
-    location.hostname === 'claude.ai' &&
-    /^\/code(\/|$)/.test(location.pathname)
-  ) {
-    return;
-  }
-
   // Merge active profiles into flat identity object
   function mergeProfiles(data) {
     const profiles = data?.profiles || [];

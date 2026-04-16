@@ -345,6 +345,18 @@ test('Disabled mapping is skipped', () => {
   if (result.text.includes('Alex Demo')) throw 'Disabled mapping should not substitute';
 });
 
+test('Mapping matches whole words only', () => {
+  const result = SubstitutionEngine.substitute('nothing is not a thing, not even this', [
+    { real: 'not', substitute: 'bad', enabled: true }
+  ]);
+  if (result.text.includes('bahing') || result.text.includes('badhing')) {
+    throw `Should not match inside "nothing", got: ${result.text}`;
+  }
+  if (!/\bbad\b/.test(result.text)) {
+    throw `Should still match standalone "not", got: ${result.text}`;
+  }
+});
+
 // ============================================================
 // SMART PATTERNS
 // ============================================================

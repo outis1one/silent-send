@@ -9,6 +9,17 @@
  * because sites like claude.ai have strict CSP that blocks inline scripts.
  */
 (function () {
+  // Claude Code (web) runs at claude.ai/code and makes tool-call requests
+  // containing real file paths, usernames, and commands. Substituting any of
+  // these corrupts tool execution, so we never hook fetch/XHR on that app.
+  if (
+    location.hostname === 'claude.ai' &&
+    /^\/code(\/|$)/.test(location.pathname)
+  ) {
+    window.__ssSkipHost = true;
+    return;
+  }
+
   window.__ssOriginalFetch = window.fetch;
   window.__ssOriginalXHROpen = XMLHttpRequest.prototype.open;
   window.__ssOriginalXHRSend = XMLHttpRequest.prototype.send;

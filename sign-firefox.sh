@@ -86,7 +86,9 @@ for attempt in $(seq 1 $MAX_ATTEMPTS); do
   echo "=== Attempt $attempt: signing v$NEW_VERSION ==="
 
   # Capture output to check for specific errors
-  OUTPUT=$(npx web-ext sign \
+  # NODE_OPTIONS forces IPv4 DNS resolution first — Node.js 18+ defaults to IPv6,
+  # which silently fails when the system can't reach addons.mozilla.org over IPv6.
+  OUTPUT=$(NODE_OPTIONS='--dns-result-order=ipv4first' npx web-ext sign \
     --no-config-discovery \
     --source-dir "$SCRIPT_DIR/dist/firefox" \
     --artifacts-dir "$SCRIPT_DIR/dist/firefox-signed" \

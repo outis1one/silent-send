@@ -129,6 +129,22 @@ const PII_PATTERNS = [
 // Context words that make ambiguous patterns more likely to be PII
 const CONTEXT_WORDS = /\b(?:born|birthday|dob|birth|passport|license|driver|ssn|social\s*security|address|home|live|lives|reside|zip|postal)\b/i;
 
+// Some patterns (home paths, shell prompts, git remotes, env var assignments)
+// match a compound string that only *contains* a configured value rather than
+// equaling it exactly (e.g. "/home/johnsmith" contains the configured
+// username "johnsmith"). A plain Set.has() exact-match check never fires for
+// these, so the same configured value gets flagged as "unconfigured" every
+// time. Length-gated to avoid short tokens (e.g. a 2-char substitute)
+// suppressing unrelated findings via accidental substring collision.
+function matchesConfiguredValue(value, configured) {
+  const lower = value.toLowerCase();
+  if (configured.has(lower)) return true;
+  for (const c of configured) {
+    if (c.length >= 3 && lower.includes(c)) return true;
+  }
+  return false;
+}
+
 const AutoDetect = {
   /**
    * Scan text for potential unconfigured PII.
@@ -178,7 +194,7 @@ const AutoDetect = {
         const value = match[0];
 
         // Skip if already configured
-        if (configured.has(value.toLowerCase())) continue;
+        if (matchesConfiguredValue(value, configured)) continue;
 
         // Skip excluded values (like 127.0.0.1)
         if (pattern.exclude && pattern.exclude.test(value)) continue;

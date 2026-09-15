@@ -349,6 +349,22 @@
 
   const CONTEXT_WORDS_RE = /\b(?:born|birthday|dob|birth|passport|license|driver|ssn|social\s*security|address|zip|postal|date\s+of\s+birth)\b/i;
 
+  // Some patterns (home paths, shell prompts, git remotes, env var assignments)
+  // match a compound string that only *contains* a configured value rather
+  // than equaling it exactly (e.g. "/home/johnsmith" contains the configured
+  // username "johnsmith"). A plain Set.has() exact-match check never fires
+  // for these, so the same configured value gets flagged as "unconfigured"
+  // every time. Length-gated to avoid short tokens suppressing unrelated
+  // findings via accidental substring collision.
+  function matchesConfiguredValue(value, configured) {
+    const lower = value.toLowerCase();
+    if (configured.has(lower)) return true;
+    for (const c of configured) {
+      if (c.length >= 3 && lower.includes(c)) return true;
+    }
+    return false;
+  }
+
   // Common English words that are capitalized but aren't proper nouns.
   // Used by the proper noun heuristic to reduce false positives.
   const COMMON_CAPITALIZED = new Set([
@@ -487,7 +503,7 @@
       let m;
       while ((m = pat.re.exec(text)) !== null) {
         const val = m[0];
-        if (configured.has(val.toLowerCase())) continue;
+        if (matchesConfiguredValue(val, configured)) continue;
         if (pat.skip && pat.skip.test(val)) continue;
         findings.push({ name: pat.name, value: val, hint: pat.hint, category: pat.cat });
       }

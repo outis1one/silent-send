@@ -51,8 +51,8 @@
 
     for (const m of sorted) {
       if (!m.enabled || !m.real?.trim() || !m.substitute?.trim()) continue;
-      const escaped = esc(m.real);
-      const regex = new RegExp(escaped, m.caseSensitive ? 'g' : 'gi');
+      const pattern = wordBoundary(m.real);
+      const regex = new RegExp(pattern, m.caseSensitive ? 'g' : 'gi');
       let match;
       while ((match = regex.exec(result)) !== null) {
         replacements.push({
@@ -71,8 +71,8 @@
     const sorted = [...maps].sort((a, b) => b.substitute.length - a.substitute.length);
     for (const m of sorted) {
       if (!m.enabled || !m.real?.trim() || !m.substitute?.trim()) continue;
-      const escaped = esc(m.substitute);
-      const regex = new RegExp(escaped, m.caseSensitive ? 'g' : 'gi');
+      const pattern = wordBoundary(m.substitute);
+      const regex = new RegExp(pattern, m.caseSensitive ? 'g' : 'gi');
       result = result.replace(regex, m.real);
     }
     return result;
@@ -80,6 +80,15 @@
 
   function esc(str) {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  // Add \b only on word-character edges so "not" doesn't match inside "nothing",
+  // while leaving non-word edges (e.g. "@foo") alone since they self-delimit.
+  function wordBoundary(str) {
+    const escaped = esc(str);
+    const left = /^\w/.test(str) ? '\\b' : '';
+    const right = /\w$/.test(str) ? '\\b' : '';
+    return left + escaped + right;
   }
 
   // ============================================================
@@ -1043,8 +1052,8 @@
     const pairs = getRevealPairs();
     let result = text;
     for (const p of pairs) {
-      const escaped = esc(p.from);
-      const regex = new RegExp(escaped, p.caseSensitive ? 'g' : 'gi');
+      const pattern = wordBoundary(p.from);
+      const regex = new RegExp(pattern, p.caseSensitive ? 'g' : 'gi');
       result = result.replace(regex, p.to);
     }
     return result;
@@ -1085,9 +1094,9 @@
     const pairs = getRevealPairs();
     let result = text;
     for (const p of pairs) {
-      const escaped = esc(p.to);   // p.to is the real value
-      const regex = new RegExp(escaped, p.caseSensitive ? 'g' : 'gi');
-      result = result.replace(regex, p.from);  // p.from is the substitute
+      const pattern = wordBoundary(p.to);
+      const regex = new RegExp(pattern, p.caseSensitive ? 'g' : 'gi');
+      result = result.replace(regex, p.from);
     }
     return result;
   }

@@ -23,8 +23,8 @@ const SubstitutionEngine = {
     for (const mapping of sorted) {
       if (!mapping.enabled || !mapping.real?.trim() || !mapping.substitute?.trim()) continue;
 
-      const escaped = this._escapeRegex(mapping.real);
-      const regex = new RegExp(escaped, mapping.caseSensitive ? 'g' : 'gi');
+      const pattern = this._wordBoundaryPattern(mapping.real);
+      const regex = new RegExp(pattern, mapping.caseSensitive ? 'g' : 'gi');
       let match;
 
       while ((match = regex.exec(result)) !== null) {
@@ -56,8 +56,8 @@ const SubstitutionEngine = {
     for (const mapping of sorted) {
       if (!mapping.enabled || !mapping.real?.trim() || !mapping.substitute?.trim()) continue;
 
-      const escaped = this._escapeRegex(mapping.substitute);
-      const regex = new RegExp(escaped, mapping.caseSensitive ? 'g' : 'gi');
+      const pattern = this._wordBoundaryPattern(mapping.substitute);
+      const regex = new RegExp(pattern, mapping.caseSensitive ? 'g' : 'gi');
       result = result.replace(regex, mapping.real);
     }
 
@@ -73,8 +73,8 @@ const SubstitutionEngine = {
     for (const mapping of mappings) {
       if (!mapping.enabled || !mapping.real?.trim()) continue;
 
-      const escaped = this._escapeRegex(mapping.real);
-      const regex = new RegExp(escaped, mapping.caseSensitive ? 'g' : 'gi');
+      const pattern = this._wordBoundaryPattern(mapping.real);
+      const regex = new RegExp(pattern, mapping.caseSensitive ? 'g' : 'gi');
 
       if (regex.test(text)) {
         found.push({
@@ -105,8 +105,8 @@ const SubstitutionEngine = {
     for (const mapping of sorted) {
       if (!mapping.enabled || !mapping.real?.trim() || !mapping.substitute?.trim()) continue;
 
-      const escaped = this._escapeRegex(mapping.real);
-      const regex = new RegExp(escaped, mapping.caseSensitive ? 'g' : 'gi');
+      const pattern = this._wordBoundaryPattern(mapping.real);
+      const regex = new RegExp(pattern, mapping.caseSensitive ? 'g' : 'gi');
       let match;
 
       while ((match = regex.exec(original)) !== null) {
@@ -144,6 +144,16 @@ const SubstitutionEngine = {
 
   _escapeRegex(str) {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  },
+
+  // Wrap an escaped literal in \b only on edges that are word characters,
+  // so "not" → "bad" matches "not" but not "nothing", while mappings whose
+  // edges aren't word chars (e.g. "@foo", "foo.com ") still work.
+  _wordBoundaryPattern(str) {
+    const escaped = this._escapeRegex(str);
+    const left = /^\w/.test(str) ? '\\b' : '';
+    const right = /\w$/.test(str) ? '\\b' : '';
+    return left + escaped + right;
   },
 };
 
